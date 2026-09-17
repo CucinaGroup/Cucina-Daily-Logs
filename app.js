@@ -111,6 +111,7 @@ const DATE_KEYS = new Set(["entry_date","best_before"]);
    AUTH
    =================================================================== */
 let SITES = [];
+let MY_SITE = null;
 sb.auth.onAuthStateChange((_e, session) => renderAuth(session));
 sb.auth.getSession().then(({ data }) => renderAuth(data.session));
 
@@ -149,15 +150,25 @@ let CURRENT = "deliveries";
 let booted = false;
 async function boot() {
   if (booted) return; booted = true;
-  const nav = $("#tabs"); nav.innerHTML = "";
-  Object.entries(LOGS).forEach(([id, def]) => {
+  await loadSites();
+  const nav = $("#tabs");
+  if (!SITES.length) {
+    nav.innerHTML = "";
+    $("#view").innerHTML = "<div class='card'><div class='body'>This login isn't linked to a site yet. Ask your manager to assign it in Supabase (site_logins) before entering data.</div></div>";
+    return;
+  }
+  MY_SITE = SITES[0];
+  const tag = el("span", { textContent: "Site: " + MY_SITE.name });
+  tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
+  $("#who").prepend(tag);
+  nav.innerHTML = "";
+  Object.entries(LOGS).filter(([id]) => id !== "sites").forEach(([id, def]) => {
     nav.append(el("button", {
       textContent: def.label,
       className: id === CURRENT ? "active" : "",
       onclick: (e) => { CURRENT = id; [...nav.children].forEach(b => b.classList.remove("active")); e.currentTarget.classList.add("active"); openTab(id); }
     }));
   });
-  await loadSites();
   openTab(CURRENT);
 }
 async function loadSites() {
@@ -187,8 +198,10 @@ function openTab(id) {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
       f.options.forEach(o => input.append(el("option", { value: o, textContent: o })));
     } else if (f.type === "site") {
-      input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
+      input = el("select");
       SITES.forEach(s => input.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+      if (MY_SITE) input.value = MY_SITE.id;
+      input.disabled = true;               // locked: one login = one site
     } else if (f.type === "textarea") {
       input = el("textarea");
     } else {
@@ -229,13 +242,10 @@ function openTab(id) {
 
   if (!def.isSites) {
     const filters = el("div", { className: "filters" });
-    const siteSel = el("select");
-    siteSel.append(el("option", { value: "", textContent: "All sites" }));
-    SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
     const fromD = el("input", { type: "date" }), toD = el("input", { type: "date" });
     filters.append(
-      fieldWrap("Site", siteSel), fieldWrap("From", fromD), fieldWrap("To", toD),
-      el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadTable(id, listCard, { site: siteSel.value, from: fromD.value, to: toD.value }) }),
+      fieldWrap("From", fromD), fieldWrap("To", toD),
+      el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadTable(id, listCard, { from: fromD.value, to: toD.value }) }),
       el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => exportCSV(id) })
     );
     lbody.append(filters);
