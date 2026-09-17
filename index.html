@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cucina Food Safety Logbook</title>
+<link rel="stylesheet" href="styles.css?v=2">
+</head>
+<body>
+<header class="topbar">
+  <h1>CUCINA — FOOD SAFETY LOGBOOK</h1>
+  <div class="who" id="who"></div>
+</header>
+
+<!-- SETUP screen (shown if config.js not filled in) -->
+<div id="setup" class="center hidden">
+  <div class="login">
+    <h2>Almost there</h2>
+    <p>Open <code>config.js</code> and paste your Supabase <b>Project URL</b> and
+       <b>anon public key</b>, then reload. See the README for the 5-minute setup.</p>
+  </div>
+</div>
+
+<!-- LOGIN screen -->
+<div id="login" class="center hidden">
+  <div class="login">
+    <h2>Sign in</h2>
+    <p>Enter your work email and password.</p>
+    <input id="email" type="email" placeholder="you@cucina.com.au" autocomplete="email">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="btn" id="signIn">Sign in</button>
+    <p id="loginMsg" class="msg"></p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="shell hidden">
+  <nav class="tabs" id="tabs"></nav>
+  <main id="view"></main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js?v=2"></script>
+<script src="app.js?v=2"></script>
+</body>
+</html>
