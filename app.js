@@ -130,15 +130,17 @@ function renderAuth(session) {
     $("#login").classList.remove("hidden");
   }
 }
-$("#sendLink").onclick = async () => {
+async function doSignIn() {
   const email = $("#email").value.trim();
+  const password = $("#password").value;
   const msg = $("#loginMsg");
-  if (!email) { msg.textContent = "Enter an email."; msg.className = "msg err"; return; }
-  msg.textContent = "Sending…"; msg.className = "msg";
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
-  msg.textContent = error ? error.message : "Check your inbox for the login link.";
-  msg.className = "msg " + (error ? "err" : "ok");
-};
+  if (!email || !password) { msg.textContent = "Enter email and password."; msg.className = "msg err"; return; }
+  msg.textContent = "Signing in…"; msg.className = "msg";
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { msg.textContent = error.message; msg.className = "msg err"; }
+}
+$("#signIn").onclick = doSignIn;
+$("#password").addEventListener("keydown", e => { if (e.key === "Enter") doSignIn(); });
 
 /* ===================================================================
    APP BOOT + NAV
