@@ -24,7 +24,7 @@ const sb = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 const SEL = (...o) => ({ type: "select", options: o });
 const LOGS = {
   sites: {
-    label: "① Sites", table: "sites", isSites: true,
+    label: "Sites", table: "sites", isSites: true,
     fields: [
       { key: "code", label: "Code", type: "text" },
       { key: "name", label: "Site name", type: "text" },
@@ -34,7 +34,7 @@ const LOGS = {
     columns: ["code","name","brand","location"]
   },
   deliveries: {
-    label: "② Delivery", table: "deliveries",
+    label: "Delivery", table: "deliveries",
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
@@ -53,7 +53,7 @@ const LOGS = {
     ]
   },
   fridge_freezer: {
-    label: "③ Fridge / Freezer", table: "fridge_freezer",
+    label: "Fridge / Freezer", table: "fridge_freezer",
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
@@ -67,11 +67,11 @@ const LOGS = {
     ],
     extraCols: ["within_range"]
   },
-  process_mep:     procDef("④ Process — MEP", "MEP"),
-  process_risky:   procDef("⑤ Process — Risky", "Risky"),
-  process_freezer: procDef("⑥ Process — Freezer", "Freezer"),
+  process_mep:     procDef("Process — MEP", "MEP"),
+  process_risky:   procDef("Process — Risky", "Risky"),
+  process_freezer: procDef("Process — Freezer", "Freezer"),
   food_waste: {
-    label: "⑦ Food Waste", table: "food_waste", totals: ["quantity","cost"],
+    label: "Food Waste", table: "food_waste", totals: ["quantity","cost"],
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
