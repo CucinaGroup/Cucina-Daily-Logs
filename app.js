@@ -112,6 +112,7 @@ const DATE_KEYS = new Set(["entry_date","best_before"]);
    =================================================================== */
 let SITES = [];
 let MY_SITE = null;
+let MULTI = false;   // admin / all-site login
 sb.auth.onAuthStateChange((_e, session) => renderAuth(session));
 sb.auth.getSession().then(({ data }) => renderAuth(data.session));
 
@@ -158,7 +159,8 @@ async function boot() {
     return;
   }
   MY_SITE = SITES[0];
-  const tag = el("span", { textContent: "Site: " + MY_SITE.name });
+  MULTI = SITES.length > 1;              // admin sees every site
+  const tag = el("span", { textContent: MULTI ? "All sites (admin)" : "Site: " + MY_SITE.name });
   tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
   $("#who").prepend(tag);
   nav.innerHTML = "";
@@ -199,9 +201,9 @@ function openTab(id) {
       f.options.forEach(o => input.append(el("option", { value: o, textContent: o })));
     } else if (f.type === "site") {
       input = el("select");
+      if (MULTI) input.append(el("option", { value: "", textContent: "—" }));
       SITES.forEach(s => input.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-      if (MY_SITE) input.value = MY_SITE.id;
-      input.disabled = true;               // locked: one login = one site
+      if (!MULTI && MY_SITE) { input.value = MY_SITE.id; input.disabled = true; } // site login: locked
     } else if (f.type === "textarea") {
       input = el("textarea");
     } else {
@@ -242,10 +244,17 @@ function openTab(id) {
 
   if (!def.isSites) {
     const filters = el("div", { className: "filters" });
+    let siteSel = null;
+    if (MULTI) {
+      siteSel = el("select");
+      siteSel.append(el("option", { value: "", textContent: "All sites" }));
+      SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    }
     const fromD = el("input", { type: "date" }), toD = el("input", { type: "date" });
+    if (siteSel) filters.append(fieldWrap("Site", siteSel));
     filters.append(
       fieldWrap("From", fromD), fieldWrap("To", toD),
-      el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadTable(id, listCard, { from: fromD.value, to: toD.value }) }),
+      el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadTable(id, listCard, { site: siteSel ? siteSel.value : "", from: fromD.value, to: toD.value }) }),
       el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => exportCSV(id) })
     );
     lbody.append(filters);
