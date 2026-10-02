@@ -178,7 +178,7 @@ async function loadSites() {
   SITES = data || [];
 }
 const siteName = id => { const s = SITES.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : ("Site " + id); };
-function statusClass(s) { s = s || "Submitted"; if (s === "Delivered" || s === "Approved") return "ok"; if (s === "Rejected") return "bad"; return "pending"; }
+function statusClass(s) { s = s || "Submitted"; if (s === "Accepted" || s === "Purchased" || s === "Approved" || s === "Delivered") return "ok"; if (s === "Rejected") return "bad"; return "pending"; }
 function fieldWrap(label, input) {
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
 }
@@ -551,12 +551,12 @@ async function renderOrderHistory(view) {
 
   function ordersCSV() {
     if (!lastOrders.length) return;
-    const head = ["Order ID","Date","Site","Merchant code","Item","Qty","Unit price","Line total"];
+    const head = ["Order ID","Date","Site","Status","Delivered","Merchant code","Item","Qty","Unit price","Line total"];
     const rows = [];
     lastOrders.forEach(o => {
       const d = new Date(o.created_at).toLocaleString();
       (o.order_lines || []).forEach(l => rows.push([
-        o.id, d, siteName(o.site_id), l.merchant_code || "", l.item_name,
+        o.id, d, siteName(o.site_id), o.status || "Submitted", o.delivered ? "Yes" : "No", l.merchant_code || "", l.item_name,
         l.quantity, Number(l.unit_price).toFixed(2), (Number(l.unit_price) * Number(l.quantity)).toFixed(2)
       ]));
     });
@@ -583,6 +583,7 @@ async function renderOrderHistory(view) {
       sum.append(el("span", { textContent: d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }));
       if (IS_ADMIN) sum.append(el("span", { className: "ord-site", textContent: siteName(o.site_id) }));
       sum.append(el("span", { className: "badge " + statusClass(o.status), textContent: o.status || "Submitted" }));
+      if (o.delivered) sum.append(el("span", { className: "badge ok", textContent: "Delivered" }));
       sum.append(el("span", { className: "ord-total", textContent: "$" + total.toFixed(2) }));
       det.append(sum);
 
@@ -612,7 +613,7 @@ async function renderOrderHistory(view) {
 
       if (IS_ADMIN) {
         const statusSel = el("select");
-        ["Submitted","Approved","Delivered","Rejected"].forEach(s => {
+        ["Submitted","Accepted","Rejected","Purchased"].forEach(s => {
           const op = el("option", { value: s, textContent: s });
           if (s === (o.status || "Submitted")) op.selected = true;
           statusSel.append(op);
@@ -633,6 +634,17 @@ async function renderOrderHistory(view) {
           load();
         }});
         det.append(el("div", { className: "actions" }, [fieldWrap("Status", statusSel), saveBtn, amsg]));
+      } else {
+        const dmsg = el("span", { className: "msg" });
+        const dbtn = el("button", { className: "btn small", textContent: o.delivered ? "Mark NOT delivered" : "Mark delivered" });
+        dbtn.onclick = async () => {
+          dbtn.disabled = true; dmsg.textContent = "Saving…"; dmsg.className = "msg";
+          const { error } = await sb.rpc("mark_delivered", { p_order_id: o.id, p_delivered: !o.delivered });
+          dbtn.disabled = false;
+          if (error) { dmsg.textContent = error.message; dmsg.className = "msg err"; return; }
+          load();
+        };
+        det.append(el("div", { className: "actions" }, [dbtn, dmsg]));
       }
       wrap.append(det);
     });
