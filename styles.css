@@ -56,7 +56,7 @@ th{background:var(--bar);color:var(--bar-text);padding:8px 9px;text-align:left;w
 td{padding:6px 9px;border-bottom:1px solid #eee;white-space:nowrap;color:#111}
 tr:nth-child(even) td{background:var(--even-row)}
 .badge{padding:2px 8px;border-radius:10px;font-weight:bold;font-size:11px}
-.badge.ok{background:#e4f6ec;color:var(--ok)} .badge.bad{background:#fde5e5;color:var(--bad)}
+.badge.ok{background:#e4f6ec;color:var(--ok)} .badge.bad{background:#fde5e5;color:var(--bad)} .badge.pending{background:#fff3cd;color:#8a6d00}
 tfoot td{background:var(--accent);font-weight:bold;color:var(--accent-text)}
 .empty{color:var(--grey);padding:16px;font-size:13px}
 
