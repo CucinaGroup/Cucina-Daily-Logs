@@ -178,6 +178,7 @@ async function loadSites() {
   SITES = data || [];
 }
 const siteName = id => { const s = SITES.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : ("Site " + id); };
+function statusClass(s) { s = s || "Submitted"; if (s === "Delivered" || s === "Approved") return "ok"; if (s === "Rejected") return "bad"; return "pending"; }
 function fieldWrap(label, input) {
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
 }
@@ -567,7 +568,7 @@ async function renderOrderHistory(view) {
 
   async function load() {
     wrap.innerHTML = "<div class='empty'>Loading…</div>";
-    let q = sb.from("orders").select("*, order_lines(quantity,unit_price,item_name,merchant_code)").order("created_at", { ascending: false }).limit(200);
+    let q = sb.from("orders").select("*, order_lines(id,quantity,unit_price,item_name,merchant_code)").order("created_at", { ascending: false }).limit(200);
     if (siteSel && siteSel.value) q = q.eq("site_id", siteSel.value);
     const { data, error } = await q;
     if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
@@ -581,21 +582,57 @@ async function renderOrderHistory(view) {
       const sum = el("summary");
       sum.append(el("span", { textContent: d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }));
       if (IS_ADMIN) sum.append(el("span", { className: "ord-site", textContent: siteName(o.site_id) }));
+      sum.append(el("span", { className: "badge " + statusClass(o.status), textContent: o.status || "Submitted" }));
       sum.append(el("span", { className: "ord-total", textContent: "$" + total.toFixed(2) }));
       det.append(sum);
+
       const tbl = el("table");
       tbl.append(el("thead", {}, el("tr", {}, [el("th", { textContent: "Item" }), el("th", { textContent: "Code" }), el("th", { textContent: "Qty" }), el("th", { textContent: "Unit $" }), el("th", { textContent: "Line $" })])));
       const tb = el("tbody");
+      const qInputs = {};
       (o.order_lines || []).forEach(l => {
+        let qtyCell;
+        if (IS_ADMIN) {
+          const qi = el("input", { type: "number", min: "0", step: "1", value: String(l.quantity), className: "qty" });
+          qInputs[l.id] = qi; qtyCell = el("td", {}, qi);
+        } else {
+          qtyCell = el("td", { textContent: String(l.quantity) });
+        }
         tb.append(el("tr", {}, [
           el("td", { textContent: l.item_name }),
           el("td", { textContent: l.merchant_code || "" }),
-          el("td", { textContent: String(l.quantity) }),
+          qtyCell,
           el("td", { textContent: "$" + Number(l.unit_price).toFixed(2) }),
           el("td", { textContent: "$" + (Number(l.unit_price) * Number(l.quantity)).toFixed(2) })
         ]));
       });
-      tbl.append(tb); det.append(tbl); wrap.append(det);
+      tbl.append(tb); det.append(tbl);
+
+      if (IS_ADMIN) {
+        const statusSel = el("select");
+        ["Submitted","Approved","Delivered","Rejected"].forEach(s => {
+          const op = el("option", { value: s, textContent: s });
+          if (s === (o.status || "Submitted")) op.selected = true;
+          statusSel.append(op);
+        });
+        const amsg = el("span", { className: "msg" });
+        const saveBtn = el("button", { className: "btn small", textContent: "Save changes", onclick: async () => {
+          saveBtn.disabled = true; amsg.textContent = "Saving…"; amsg.className = "msg";
+          for (const l of (o.order_lines || [])) {
+            const nv = Number(qInputs[l.id].value) || 0;
+            if (nv !== Number(l.quantity)) {
+              if (nv <= 0) await sb.from("order_lines").delete().eq("id", l.id);
+              else await sb.from("order_lines").update({ quantity: nv }).eq("id", l.id);
+            }
+          }
+          const { error } = await sb.from("orders").update({ status: statusSel.value }).eq("id", o.id);
+          saveBtn.disabled = false;
+          if (error) { amsg.textContent = error.message; amsg.className = "msg err"; return; }
+          load();
+        }});
+        det.append(el("div", { className: "actions" }, [fieldWrap("Status", statusSel), saveBtn, amsg]));
+      }
+      wrap.append(det);
     });
   }
   load();
