@@ -351,6 +351,7 @@ async function renderCatalogue(view) {
   view.innerHTML = "";
   const cats = await loadCategories();
 
+  // ---- add item ----
   const card = el("div", { className: "card" });
   card.append(el("h2", { textContent: "Add catalogue item" }));
   const b = el("div", { className: "body" });
@@ -374,12 +375,19 @@ async function renderCatalogue(view) {
   const msg = el("span", { className: "msg" });
   const save = el("button", { className: "btn", textContent: "Add item" });
   b.append(el("div", { className: "actions" }, [save, msg]));
-
   const newCat = el("input", { type: "text", placeholder: "New category name" });
   const addCat = el("button", { className: "btn ghost small", textContent: "Add category" });
   b.append(el("div", { className: "actions" }, [el("span", { className: "sub", textContent: "New category:" }), newCat, addCat]));
   card.append(b); view.append(card);
 
+  // ---- manage categories ----
+  const catCard = el("div", { className: "card" });
+  catCard.append(el("h2", { textContent: "Categories" }));
+  catCard.append(el("div", { className: "body" }));
+  view.append(catCard);
+  renderCategoryManager(catCard, view);
+
+  // ---- catalogue list ----
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Catalogue" }));
   listCard.append(el("div", { className: "body" }));
@@ -415,6 +423,91 @@ async function renderCatalogue(view) {
     renderCatalogueList(listCard);
   };
 }
+
+async function renderCategoryManager(card, view) {
+  const body = card.querySelector(".body");
+  body.innerHTML = "";
+  const cats = await loadCategories();
+  if (!cats.length) { body.append(el("div", { className: "empty", textContent: "No categories yet — add one above." })); return; }
+  cats.forEach(c => {
+    const nameI = el("input", { type: "text", value: c.name });
+    const cmsg = el("span", { className: "msg" });
+    const rename = el("button", { className: "btn ghost small", textContent: "Rename", onclick: async () => {
+      const n = nameI.value.trim(); if (!n) return;
+      const { error } = await sb.from("item_categories").update({ name: n }).eq("id", c.id);
+      if (error) { cmsg.textContent = error.message; cmsg.className = "msg err"; return; }
+      renderCatalogue(view);
+    }});
+    const del = el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+      if (!confirm("Delete category \"" + c.name + "\"? Items in it become uncategorised.")) return;
+      const { error } = await sb.from("item_categories").delete().eq("id", c.id);
+      if (error) { cmsg.textContent = error.message; cmsg.className = "msg err"; return; }
+      renderCatalogue(view);
+    }});
+    body.append(el("div", { className: "actions" }, [fieldWrap("Category", nameI), rename, del, cmsg]));
+  });
+}
+
+function itemCard(i, cats, card) {
+  const ci = el("div", { className: "item-card" });
+  ci.append(i.photo_url
+    ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
+    : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
+  ci.append(el("div", { className: "item-name", textContent: i.name }));
+  if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
+  if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
+  ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
+  ci.append(el("div", { className: "actions" }, [
+    el("button", { className: "btn ghost small", textContent: "Edit", onclick: () => ci.replaceWith(itemEditCard(i, cats, card)) }),
+    el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+      if (!confirm("Delete " + i.name + "?")) return;
+      await sb.from("catalogue_items").delete().eq("id", i.id);
+      renderCatalogueList(card);
+    }})
+  ]));
+  return ci;
+}
+
+function itemEditCard(i, cats, card) {
+  const ci = el("div", { className: "item-card" });
+  const catSel = el("select");
+  cats.forEach(c => { const o = el("option", { value: c.id, textContent: c.name }); if (c.id === i.category_id) o.selected = true; catSel.append(o); });
+  const nameI = el("input", { type: "text", value: i.name });
+  const codeI = el("input", { type: "text", value: i.merchant_code || "" });
+  const priceI = el("input", { type: "number", step: "0.01", min: "0", value: i.price != null ? String(i.price) : "" });
+  const photoI = el("input", { type: "file", accept: "image/*" });
+  const descI = el("textarea"); descI.value = i.description || "";
+  ci.append(
+    fieldWrap("Category", catSel),
+    fieldWrap("Item name", nameI),
+    fieldWrap("Merchant code", codeI),
+    fieldWrap("Price $", priceI),
+    fieldWrap("Replace photo", photoI),
+    fieldWrap("Description", descI)
+  );
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn small", textContent: "Save", onclick: async () => {
+    const name = nameI.value.trim();
+    if (!name) { msg.textContent = "Name required."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const patch = { category_id: Number(catSel.value), name, merchant_code: codeI.value || null, description: descI.value || null, price: Number(priceI.value || 0) };
+    const file = photoI.files[0];
+    if (file) {
+      const path = Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "");
+      const { error: upErr } = await sb.storage.from("item-photos").upload(path, file);
+      if (upErr) { save.disabled = false; msg.textContent = "Photo: " + upErr.message; msg.className = "msg err"; return; }
+      patch.photo_url = sb.storage.from("item-photos").getPublicUrl(path).data.publicUrl;
+    }
+    const { error } = await sb.from("catalogue_items").update(patch).eq("id", i.id);
+    save.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    renderCatalogueList(card);
+  }});
+  const cancel = el("button", { className: "btn ghost small", textContent: "Cancel", onclick: () => renderCatalogueList(card) });
+  ci.append(el("div", { className: "actions" }, [save, cancel, msg]));
+  return ci;
+}
+
 async function renderCatalogueList(card) {
   const body = card.querySelector(".body");
   body.innerHTML = "<div class='empty'>Loading…</div>";
@@ -429,24 +522,16 @@ async function renderCatalogueList(card) {
     if (!group.length) return;
     body.append(el("div", { className: "cat-group", textContent: c.name }));
     const grid = el("div", { className: "cat-grid" });
-    group.forEach(i => {
-      const ci = el("div", { className: "item-card" });
-      ci.append(i.photo_url
-        ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
-        : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
-      ci.append(el("div", { className: "item-name", textContent: i.name }));
-      if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
-      if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
-      ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
-      ci.append(el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
-        if (!confirm("Delete " + i.name + "?")) return;
-        await sb.from("catalogue_items").delete().eq("id", i.id);
-        renderCatalogueList(card);
-      }}));
-      grid.append(ci);
-    });
+    group.forEach(i => grid.append(itemCard(i, cats, card)));
     body.append(grid);
   });
+  const uncategorised = items.filter(i => !(cats || []).some(c => c.id === i.category_id));
+  if (uncategorised.length) {
+    body.append(el("div", { className: "cat-group", textContent: "(Uncategorised)" }));
+    const grid = el("div", { className: "cat-grid" });
+    uncategorised.forEach(i => grid.append(itemCard(i, cats, card)));
+    body.append(grid);
+  }
 }
 
 /* ===================== ORDER (site + admin) ===================== */
