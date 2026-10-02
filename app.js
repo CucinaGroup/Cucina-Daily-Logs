@@ -587,8 +587,9 @@ async function renderOrderHistory(view) {
       det.append(sum);
 
       const tbl = el("table");
-      tbl.append(el("thead", {}, el("tr", {}, [el("th", { textContent: "Item" }), el("th", { textContent: "Code" }), el("th", { textContent: "Qty" }), el("th", { textContent: "Unit $" }), el("th", { textContent: "Line $" })])));
+      tbl.append(el("thead", {}, el("tr", {}, [el("th", { textContent: "Ordered" }), el("th", { textContent: "Item" }), el("th", { textContent: "Code" }), el("th", { textContent: "Qty" }), el("th", { textContent: "Unit $" }), el("th", { textContent: "Line $" })])));
       const tb = el("tbody");
+      const orderedDate = new Date(o.created_at).toLocaleDateString();
       const qInputs = {};
       (o.order_lines || []).forEach(l => {
         let qtyCell;
@@ -599,6 +600,7 @@ async function renderOrderHistory(view) {
           qtyCell = el("td", { textContent: String(l.quantity) });
         }
         tb.append(el("tr", {}, [
+          el("td", { textContent: orderedDate }),
           el("td", { textContent: l.item_name }),
           el("td", { textContent: l.merchant_code || "" }),
           qtyCell,
