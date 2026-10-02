@@ -357,12 +357,14 @@ async function renderCatalogue(view) {
   const catSel = el("select");
   cats.forEach(c => catSel.append(el("option", { value: c.id, textContent: c.name })));
   const nameI = el("input", { type: "text" });
+  const codeI = el("input", { type: "text" });
   const priceI = el("input", { type: "number", step: "0.01", min: "0" });
   const photoI = el("input", { type: "file", accept: "image/*" });
   const descI = el("textarea");
   grid.append(
     fieldWrap("Category", catSel),
     fieldWrap("Item name", nameI),
+    fieldWrap("Merchant code", codeI),
     fieldWrap("Price $", priceI),
     fieldWrap("Photo", photoI),
     fieldWrap("Description", descI)
@@ -402,13 +404,13 @@ async function renderCatalogue(view) {
       photo_url = sb.storage.from("item-photos").getPublicUrl(path).data.publicUrl;
     }
     const { error } = await sb.from("catalogue_items").insert([{
-      category_id: Number(catSel.value), name,
+      category_id: Number(catSel.value), name, merchant_code: codeI.value || null,
       description: descI.value || null, price: Number(priceI.value || 0), photo_url
     }]);
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
     msg.textContent = "Added ✓"; msg.className = "msg ok";
-    nameI.value = ""; priceI.value = ""; descI.value = ""; photoI.value = "";
+    nameI.value = ""; codeI.value = ""; priceI.value = ""; descI.value = ""; photoI.value = "";
     renderCatalogueList(listCard);
   };
 }
@@ -432,6 +434,7 @@ async function renderCatalogueList(card) {
         ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
         : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
       ci.append(el("div", { className: "item-name", textContent: i.name }));
+      if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
       if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
       ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
       ci.append(el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
@@ -496,6 +499,7 @@ async function renderOrder(view) {
           ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
           : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
         ci.append(el("div", { className: "item-name", textContent: i.name }));
+        if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
         if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
         ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
         const q = el("input", { type: "number", min: "0", step: "1", value: "0", className: "qty" });
@@ -514,7 +518,7 @@ async function renderOrder(view) {
     submit.disabled = true; omsg.textContent = "Submitting…"; omsg.className = "msg";
     const { data: ord, error } = await sb.from("orders").insert([{ site_id: orderSite }]).select().single();
     if (error) { submit.disabled = false; omsg.textContent = error.message; omsg.className = "msg err"; return; }
-    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, unit_price: Number(i.price), quantity: qty[i.id] }));
+    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, merchant_code: i.merchant_code || null, unit_price: Number(i.price), quantity: qty[i.id] }));
     const { error: lerr } = await sb.from("order_lines").insert(payload);
     submit.disabled = false;
     if (lerr) { omsg.textContent = lerr.message; omsg.className = "msg err"; return; }
@@ -538,17 +542,37 @@ async function renderOrderHistory(view) {
     filters.append(fieldWrap("Site", siteSel));
   }
   filters.append(el("button", { className: "btn ghost", textContent: "Apply", onclick: () => load() }));
+  filters.append(el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => ordersCSV() }));
   b.append(filters);
   const wrap = el("div"); b.append(wrap);
   card.append(b); view.append(card);
+  let lastOrders = [];
+
+  function ordersCSV() {
+    if (!lastOrders.length) return;
+    const head = ["Order ID","Date","Site","Merchant code","Item","Qty","Unit price","Line total"];
+    const rows = [];
+    lastOrders.forEach(o => {
+      const d = new Date(o.created_at).toLocaleString();
+      (o.order_lines || []).forEach(l => rows.push([
+        o.id, d, siteName(o.site_id), l.merchant_code || "", l.item_name,
+        l.quantity, Number(l.unit_price).toFixed(2), (Number(l.unit_price) * Number(l.quantity)).toFixed(2)
+      ]));
+    });
+    const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const tag = (siteSel && siteSel.value) ? "_" + siteName(Number(siteSel.value)).split(" ")[0] : "_all-sites";
+    const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "orders" + tag + "_" + new Date().toISOString().slice(0,10) + ".csv" });
+    document.body.append(a); a.click(); a.remove();
+  }
 
   async function load() {
     wrap.innerHTML = "<div class='empty'>Loading…</div>";
-    let q = sb.from("orders").select("*, order_lines(quantity,unit_price,item_name)").order("created_at", { ascending: false }).limit(200);
+    let q = sb.from("orders").select("*, order_lines(quantity,unit_price,item_name,merchant_code)").order("created_at", { ascending: false }).limit(200);
     if (siteSel && siteSel.value) q = q.eq("site_id", siteSel.value);
     const { data, error } = await q;
     if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
-    if (!data || !data.length) { wrap.innerHTML = "<div class='empty'>No orders yet.</div>"; return; }
+    if (!data || !data.length) { lastOrders = []; wrap.innerHTML = "<div class='empty'>No orders yet.</div>"; return; }
+    lastOrders = data;
     wrap.innerHTML = "";
     data.forEach(o => {
       const total = (o.order_lines || []).reduce((a, l) => a + Number(l.unit_price) * Number(l.quantity), 0);
@@ -560,11 +584,12 @@ async function renderOrderHistory(view) {
       sum.append(el("span", { className: "ord-total", textContent: "$" + total.toFixed(2) }));
       det.append(sum);
       const tbl = el("table");
-      tbl.append(el("thead", {}, el("tr", {}, [el("th", { textContent: "Item" }), el("th", { textContent: "Qty" }), el("th", { textContent: "Unit $" }), el("th", { textContent: "Line $" })])));
+      tbl.append(el("thead", {}, el("tr", {}, [el("th", { textContent: "Item" }), el("th", { textContent: "Code" }), el("th", { textContent: "Qty" }), el("th", { textContent: "Unit $" }), el("th", { textContent: "Line $" })])));
       const tb = el("tbody");
       (o.order_lines || []).forEach(l => {
         tb.append(el("tr", {}, [
           el("td", { textContent: l.item_name }),
+          el("td", { textContent: l.merchant_code || "" }),
           el("td", { textContent: String(l.quantity) }),
           el("td", { textContent: "$" + Number(l.unit_price).toFixed(2) }),
           el("td", { textContent: "$" + (Number(l.unit_price) * Number(l.quantity)).toFixed(2) })
