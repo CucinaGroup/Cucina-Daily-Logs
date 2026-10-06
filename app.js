@@ -160,8 +160,8 @@ async function boot() {
   const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
   navDefs.push({ id: "order", label: "Order" });
   if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
-  navDefs.push({ id: "staff", label: "Staff" });
-  navDefs.push({ id: "assessments", label: "Assessments" });
+  navDefs.push({ id: "refresher", label: "Refresher" });
+  if (IS_ADMIN) navDefs.push({ id: "questions", label: "Questions" });
 
   nav.innerHTML = "";
   navDefs.forEach(d => {
@@ -188,8 +188,8 @@ function openTab(id) {
   const view = $("#view"); view.innerHTML = "";
   if (id === "order") return renderOrder(view);
   if (id === "catalogue") return renderCatalogue(view);
-  if (id === "staff") return renderStaff(view);
-  if (id === "assessments") return renderAssessments(view);
+  if (id === "refresher") return renderRefresher(view);
+  if (id === "questions") return renderQuestions(view);
   return renderLog(id, view);
 }
 
@@ -739,172 +739,175 @@ async function renderOrderHistory(view) {
   load();
 }
 
-/* ===================== STAFF (roster) ===================== */
-const ASSESS_CRITERIA = [
-  { key: "punctuality",   label: "Punctuality & Attendance" },
-  { key: "food_safety",   label: "Food Safety & Hygiene" },
-  { key: "teamwork",      label: "Teamwork" },
-  { key: "customer",      label: "Customer Service" },
-  { key: "initiative",    label: "Initiative & Reliability" }
-];
 
-async function loadStaff(siteFilter) {
-  let q = sb.from("staff").select("*").eq("active", true).order("name");
-  if (siteFilter) q = q.eq("site_id", siteFilter);
+/* ===================== REFRESHER QUIZ ===================== */
+const PASS_PCT = 80;   // pass mark
+
+async function loadQuestions(activeOnly) {
+  let q = sb.from("refresher_questions").select("*").order("id");
+  if (activeOnly) q = q.eq("active", true);
   const { data } = await q;
   return data || [];
 }
 
-async function renderStaff(view) {
+/* ---- Questions bank (admin) ---- */
+async function renderQuestions(view) {
   view.innerHTML = "";
-  // add staff
   const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "Add team member" }));
+  card.append(el("h2", { textContent: "Add refresher question" }));
   const b = el("div", { className: "body" });
   const grid = el("div", { className: "formgrid" });
-  const inputs = {};
-  let siteInput;
-  if (IS_ADMIN) {
-    siteInput = el("select");
-    siteInput.append(el("option", { value: "", textContent: "— site —" }));
-    SITES.forEach(s => siteInput.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-  } else {
-    siteInput = el("select"); SITES.forEach(s => siteInput.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-    if (MY_SITE) { siteInput.value = MY_SITE.id; siteInput.disabled = true; }
-  }
-  const nameI = el("input", { type: "text" });
-  const roleI = el("input", { type: "text" });
-  grid.append(fieldWrap("Site", siteInput), fieldWrap("Name", nameI), fieldWrap("Role / position", roleI));
+  const qI = el("textarea");
+  const aI = el("input", { type: "text" });
+  const bI = el("input", { type: "text" });
+  const cI = el("input", { type: "text" });
+  const dI = el("input", { type: "text" });
+  const correct = el("select");
+  ["A","B","C","D"].forEach(o => correct.append(el("option", { value: o, textContent: o })));
+  grid.append(
+    fieldWrap("Question", qI),
+    fieldWrap("Option A", aI),
+    fieldWrap("Option B", bI),
+    fieldWrap("Option C", cI),
+    fieldWrap("Option D", dI),
+    fieldWrap("Correct answer", correct)
+  );
   b.append(grid);
   const msg = el("span", { className: "msg" });
-  const save = el("button", { className: "btn", textContent: "Add member" });
+  const save = el("button", { className: "btn", textContent: "Add question" });
   b.append(el("div", { className: "actions" }, [save, msg]));
   card.append(b); view.append(card);
 
   const listCard = el("div", { className: "card" });
-  listCard.append(el("h2", { textContent: "Team" }));
+  listCard.append(el("h2", { textContent: "Question bank" }));
   listCard.append(el("div", { className: "body" }));
   view.append(listCard);
-  loadStaffList(listCard);
+  loadQuestionList(listCard);
 
   save.onclick = async () => {
-    const name = nameI.value.trim();
-    const site_id = Number(siteInput.value) || (MY_SITE ? MY_SITE.id : null);
-    if (!name || !site_id) { msg.textContent = "Name and site are required."; msg.className = "msg err"; return; }
+    const question = qI.value.trim();
+    if (!question || !aI.value.trim() || !bI.value.trim()) { msg.textContent = "Question and at least options A and B are required."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.from("staff").insert([{ site_id, name, role: roleI.value || null }]);
+    const { error } = await sb.from("refresher_questions").insert([{
+      question, option_a: aI.value || null, option_b: bI.value || null,
+      option_c: cI.value || null, option_d: dI.value || null, correct: correct.value
+    }]);
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
     msg.textContent = "Added ✓"; msg.className = "msg ok";
-    nameI.value = ""; roleI.value = "";
-    loadStaffList(listCard);
+    qI.value = ""; aI.value = ""; bI.value = ""; cI.value = ""; dI.value = "";
+    loadQuestionList(listCard);
   };
 }
 
-async function loadStaffList(card) {
+async function loadQuestionList(card) {
   const body = card.querySelector(".body");
   body.innerHTML = "<div class='empty'>Loading…</div>";
-  const staff = await loadStaff(IS_ADMIN ? null : (MY_SITE ? MY_SITE.id : null));
-  if (!staff.length) { body.innerHTML = "<div class='empty'>No team members yet.</div>"; return; }
-  const table = el("table");
-  const cols = IS_ADMIN ? ["Name","Role","Site",""] : ["Name","Role",""];
-  table.append(el("thead", {}, el("tr", {}, cols.map(c => el("th", { textContent: c })))));
-  const tb = el("tbody");
-  staff.forEach(s => {
-    const cells = [el("td", { textContent: s.name }), el("td", { textContent: s.role || "" })];
-    if (IS_ADMIN) cells.push(el("td", { textContent: siteName(s.site_id) }));
-    cells.push(el("td", {}, el("button", { className: "btn ghost small", textContent: "Remove", onclick: async () => {
-      if (!confirm("Remove " + s.name + " from the team list?")) return;
-      await sb.from("staff").update({ active: false }).eq("id", s.id);
-      loadStaffList(card);
-    }})));
-    tb.append(el("tr", {}, cells));
+  const qs = await loadQuestions(false);
+  if (!qs.length) { body.innerHTML = "<div class='empty'>No questions yet — add some above.</div>"; return; }
+  body.innerHTML = "";
+  qs.forEach((q, i) => {
+    const row = el("div", { className: "card", style: "margin-bottom:10px" });
+    const rb = el("div", { className: "body" });
+    rb.append(el("p", { style: "font-weight:bold;margin:0 0 6px", textContent: (i+1) + ". " + q.question + (q.active ? "" : "  (inactive)") }));
+    ["a","b","c","d"].forEach(L => {
+      const txt = q["option_" + L];
+      if (txt) {
+        const isC = q.correct === L.toUpperCase();
+        rb.append(el("p", { style: "margin:2px 0;font-size:13px;color:" + (isC ? "#1f9d55" : "#555"), textContent: L.toUpperCase() + ". " + txt + (isC ? "  ✓ correct" : "") }));
+      }
+    });
+    rb.append(el("div", { className: "actions" }, [
+      el("button", { className: "btn ghost small", textContent: q.active ? "Deactivate" : "Reactivate", onclick: async () => {
+        await sb.from("refresher_questions").update({ active: !q.active }).eq("id", q.id); loadQuestionList(card);
+      }}),
+      el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+        if (!confirm("Delete this question?")) return;
+        await sb.from("refresher_questions").delete().eq("id", q.id); loadQuestionList(card);
+      }})
+    ]));
+    row.append(rb); body.append(row);
   });
-  table.append(tb);
-  body.innerHTML = ""; body.append(el("div", { className: "tablewrap" }, table));
 }
 
-/* ===================== ASSESSMENTS (monthly) ===================== */
-async function renderAssessments(view) {
+/* ---- Take the refresher (everyone) ---- */
+async function renderRefresher(view) {
   view.innerHTML = "";
   const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "New monthly assessment" }));
+  card.append(el("h2", { textContent: "Monthly refresher assessment" }));
   const b = el("div", { className: "body" });
 
-  // site + staff + month
   const top = el("div", { className: "formgrid" });
-  let siteSel = null, orderSite = (!IS_ADMIN && MY_SITE) ? MY_SITE.id : null;
-  const staffSel = el("select");
-  async function fillStaff(sid) {
-    staffSel.innerHTML = "";
-    staffSel.append(el("option", { value: "", textContent: "— team member —" }));
-    const staff = await loadStaff(sid);
-    staff.forEach(s => staffSel.append(el("option", { value: s.id, textContent: s.name + (s.role ? " — " + s.role : "") })));
-  }
+  let orderSite = (!IS_ADMIN && MY_SITE) ? MY_SITE.id : null;
+  let siteSel = null;
   if (IS_ADMIN) {
     siteSel = el("select");
     siteSel.append(el("option", { value: "", textContent: "— site —" }));
     SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-    siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; fillStaff(orderSite); };
+    siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; };
     top.append(fieldWrap("Site", siteSel));
   }
-  const monthI = el("input", { type: "month" });
-  const now = new Date(); monthI.value = now.toISOString().slice(0,7);
-  const assessorI = el("input", { type: "text" });
-  top.append(fieldWrap("Team member", staffSel), fieldWrap("Month", monthI), fieldWrap("Assessed by", assessorI));
+  const nameI = el("input", { type: "text" });
+  const monthI = el("input", { type: "month" }); monthI.value = new Date().toISOString().slice(0,7);
+  top.append(fieldWrap("Your name", nameI), fieldWrap("Month", monthI));
   b.append(top);
-  if (!IS_ADMIN) fillStaff(orderSite);
+  b.append(el("div", { className: "sub", textContent: "Answer every question, then submit. Pass mark is " + PASS_PCT + "%." }));
 
-  // criteria 1-5
-  const critWrap = el("div", { className: "formgrid" });
-  const scoreInputs = {};
-  ASSESS_CRITERIA.forEach(c => {
-    const sel = el("select");
-    sel.append(el("option", { value: "", textContent: "—" }));
-    [1,2,3,4,5].forEach(n => sel.append(el("option", { value: n, textContent: n + (n===1?" — Needs improvement":n===3?" — Meets":n===5?" — Outstanding":"") })));
-    scoreInputs[c.key] = sel;
-    critWrap.append(fieldWrap(c.label + " (1–5)", sel));
-  });
-  b.append(el("div", { className: "sub", textContent: "Rate each area from 1 (needs improvement) to 5 (outstanding)." }));
-  b.append(critWrap);
-
-  const commentI = el("textarea");
-  b.append(el("div", { className: "field" }, [el("label", { textContent: "Comments / goals for next month" }), commentI]));
-
-  const avgLine = el("div", { className: "order-total" });
-  const avgTxt = el("span", { textContent: "Overall score: —" });
-  const save = el("button", { className: "btn", textContent: "Save assessment" });
-  const msg = el("span", { className: "msg" });
-  avgLine.append(avgTxt); avgLine.append(el("div", { style: "flex:1" })); avgLine.append(save); avgLine.append(msg);
-  function recompute() {
-    const vals = ASSESS_CRITERIA.map(c => Number(scoreInputs[c.key].value)).filter(n => n > 0);
-    avgTxt.textContent = vals.length ? "Overall score: " + (vals.reduce((a,x)=>a+x,0)/vals.length).toFixed(1) + " / 5" : "Overall score: —";
+  const qWrap = el("div"); b.append(qWrap);
+  const answers = {};
+  const qs = await loadQuestions(true);
+  if (!qs.length) {
+    qWrap.innerHTML = "<div class='empty'>No questions have been set up yet. Ask head office to add them in the Questions tab.</div>";
+  } else {
+    qs.forEach((q, i) => {
+      const block = el("div", { style: "padding:12px 0;border-bottom:1px solid #eee" });
+      block.append(el("p", { style: "font-weight:bold;margin:0 0 8px", textContent: (i+1) + ". " + q.question }));
+      ["a","b","c","d"].forEach(L => {
+        const txt = q["option_" + L];
+        if (!txt) return;
+        const opt = el("label", { style: "display:flex;gap:10px;align-items:center;padding:5px 0;font-size:14px;cursor:pointer" });
+        const radio = el("input", { type: "radio", name: "q" + q.id, value: L.toUpperCase() });
+        radio.onchange = () => { answers[q.id] = L.toUpperCase(); };
+        opt.append(radio, el("span", { textContent: L.toUpperCase() + ". " + txt }));
+        block.append(opt);
+      });
+      qWrap.append(block);
+    });
   }
-  ASSESS_CRITERIA.forEach(c => scoreInputs[c.key].onchange = recompute);
-  b.append(avgLine);
+
+  const resultBar = el("div", { className: "order-total" });
+  const resultTxt = el("span", { textContent: "Not submitted" });
+  const submit = el("button", { className: "btn", textContent: "Submit answers" });
+  const msg = el("span", { className: "msg" });
+  resultBar.append(resultTxt, el("div", { style: "flex:1" }), submit, msg);
+  if (qs.length) b.append(resultBar);
   card.append(b); view.append(card);
 
-  save.onclick = async () => {
-    const staff_id = Number(staffSel.value);
-    const site_id = orderSite;
-    if (!site_id || !staff_id) { msg.textContent = "Choose a site and team member."; msg.className = "msg err"; return; }
-    const vals = ASSESS_CRITERIA.map(c => Number(scoreInputs[c.key].value)).filter(n => n > 0);
-    if (!vals.length) { msg.textContent = "Rate at least one area."; msg.className = "msg err"; return; }
-    const overall = Number((vals.reduce((a,x)=>a+x,0)/vals.length).toFixed(2));
-    const row = { site_id, staff_id, period_month: monthI.value + "-01", assessor: assessorI.value || null, comments: commentI.value || null, overall };
-    ASSESS_CRITERIA.forEach(c => row[c.key] = Number(scoreInputs[c.key].value) || null);
-    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.from("assessments").insert([row]);
-    save.disabled = false;
-    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
-    msg.textContent = "Saved ✓"; msg.className = "msg ok";
-    ASSESS_CRITERIA.forEach(c => scoreInputs[c.key].value = ""); commentI.value = ""; recompute();
-    loadAssessmentList(histCard, { site: IS_ADMIN && siteSel ? siteSel.value : "" });
+  submit.onclick = async () => {
+    if (!orderSite) { msg.textContent = "Choose a site first."; msg.className = "msg err"; return; }
+    if (!nameI.value.trim()) { msg.textContent = "Enter your name."; msg.className = "msg err"; return; }
+    if (Object.keys(answers).length < qs.length) { msg.textContent = "Please answer all questions."; msg.className = "msg err"; return; }
+    let correct = 0;
+    qs.forEach(q => { if (answers[q.id] === q.correct) correct++; });
+    const total = qs.length;
+    const pct = Math.round((correct / total) * 100);
+    const passed = pct >= PASS_PCT;
+    resultTxt.textContent = "Score: " + correct + " / " + total + "  (" + pct + "%) — " + (passed ? "PASS" : "FAIL");
+    resultBar.style.background = passed ? "#1f9d55" : "#e02424";
+    resultBar.style.color = "#fff";
+    submit.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const { error } = await sb.from("refresher_results").insert([{
+      site_id: orderSite, staff_name: nameI.value.trim(), period_month: monthI.value + "-01",
+      score: correct, total, percent: pct, passed
+    }]);
+    if (error) { submit.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Recorded ✓"; msg.className = "msg ok";
+    loadRefresherResults(histCard, { site: IS_ADMIN && siteSel ? siteSel.value : "" });
   };
 
-  // history
+  // results history
   const histCard = el("div", { className: "card" });
-  histCard.append(el("h2", { textContent: "Assessment history" }));
+  histCard.append(el("h2", { textContent: "Results" }));
   const hb = el("div", { className: "body" });
   const filters = el("div", { className: "filters" });
   let fSite = null;
@@ -916,64 +919,48 @@ async function renderAssessments(view) {
   }
   const fMonth = el("input", { type: "month" });
   filters.append(fieldWrap("Month", fMonth),
-    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadAssessmentList(histCard, { site: fSite ? fSite.value : "", month: fMonth.value }) }),
-    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => assessmentCSV() }));
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadRefresherResults(histCard, { site: fSite ? fSite.value : "", month: fMonth.value }) }),
+    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => refresherCSV() }));
   hb.append(filters);
   hb.append(el("div", { className: "tablewrap" }));
   histCard.append(hb); view.append(histCard);
-  loadAssessmentList(histCard);
+  loadRefresherResults(histCard);
 }
 
-let ASSESS_ROWS = [];
-async function loadAssessmentList(card, flt = {}) {
+let REFRESHER_ROWS = [];
+async function loadRefresherResults(card, flt = {}) {
   const tw = card.querySelector(".tablewrap");
   tw.innerHTML = "<div class='empty'>Loading…</div>";
-  let q = sb.from("assessments").select("*, staff(name,role)").order("period_month", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  let q = sb.from("refresher_results").select("*").order("period_month", { ascending: false }).order("created_at", { ascending: false }).limit(500);
   if (flt.site) q = q.eq("site_id", flt.site);
   if (flt.month) q = q.eq("period_month", flt.month + "-01");
   const { data, error } = await q;
   if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
-  ASSESS_ROWS = data || [];
-  if (!ASSESS_ROWS.length) { tw.innerHTML = "<div class='empty'>No assessments yet.</div>"; return; }
+  REFRESHER_ROWS = data || [];
+  if (!REFRESHER_ROWS.length) { tw.innerHTML = "<div class='empty'>No results yet.</div>"; return; }
   const table = el("table");
-  const head = ["Month","Team member"].concat(IS_ADMIN ? ["Site"] : []).concat(["Overall","Assessed by"]);
+  const head = ["Month","Name"].concat(IS_ADMIN ? ["Site"] : []).concat(["Score","Result"]);
   table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
-  ASSESS_ROWS.forEach(r => {
-    const m = r.period_month ? r.period_month.slice(0,7) : "";
-    const cells = [el("td", { textContent: m }), el("td", { textContent: r.staff ? r.staff.name : "" })];
+  REFRESHER_ROWS.forEach(r => {
+    const cells = [el("td", { textContent: r.period_month ? r.period_month.slice(0,7) : "" }), el("td", { textContent: r.staff_name || "" })];
     if (IS_ADMIN) cells.push(el("td", { textContent: siteName(r.site_id) }));
-    cells.push(el("td", { textContent: (r.overall != null ? r.overall + " / 5" : "") }));
-    cells.push(el("td", { textContent: r.assessor || "" }));
-    const tr = el("tr", {}, cells);
-    tr.style.cursor = "pointer";
-    tr.onclick = () => showAssessment(r);
-    tb.append(tr);
+    cells.push(el("td", { textContent: r.score + " / " + r.total + " (" + r.percent + "%)" }));
+    cells.push(el("td", {}, el("span", { className: "badge " + (r.passed ? "ok" : "bad"), textContent: r.passed ? "PASS" : "FAIL" })));
+    tb.append(el("tr", {}, cells));
   });
   table.append(tb);
   tw.innerHTML = ""; tw.append(table);
 }
 
-function showAssessment(r) {
-  const lines = ASSESS_CRITERIA.map(c => c.label + ": " + (r[c.key] != null ? r[c.key] + "/5" : "—")).join("\n");
-  alert(
-    (r.staff ? r.staff.name : "") + (r.staff && r.staff.role ? " (" + r.staff.role + ")" : "") + "\n" +
-    "Month: " + (r.period_month ? r.period_month.slice(0,7) : "") + "\n" +
-    "Overall: " + (r.overall != null ? r.overall + "/5" : "—") + "\n\n" +
-    lines + "\n\n" +
-    "Comments: " + (r.comments || "—") + "\n" +
-    "Assessed by: " + (r.assessor || "—")
-  );
-}
-
-function assessmentCSV() {
-  if (!ASSESS_ROWS.length) return;
-  const head = ["Month","Team member","Role","Site"].concat(ASSESS_CRITERIA.map(c => c.label)).concat(["Overall","Assessed by","Comments"]);
-  const rows = ASSESS_ROWS.map(r => [
-    r.period_month ? r.period_month.slice(0,7) : "",
-    r.staff ? r.staff.name : "", r.staff ? (r.staff.role || "") : "", siteName(r.site_id)
-  ].concat(ASSESS_CRITERIA.map(c => r[c.key] != null ? r[c.key] : "")).concat([r.overall != null ? r.overall : "", r.assessor || "", r.comments || ""]));
+function refresherCSV() {
+  if (!REFRESHER_ROWS.length) return;
+  const head = ["Month","Name","Site","Score","Total","Percent","Result"];
+  const rows = REFRESHER_ROWS.map(r => [
+    r.period_month ? r.period_month.slice(0,7) : "", r.staff_name || "", siteName(r.site_id),
+    r.score, r.total, r.percent, r.passed ? "PASS" : "FAIL"
+  ]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "assessments_" + new Date().toISOString().slice(0,10) + ".csv" });
+  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "refresher_" + new Date().toISOString().slice(0,10) + ".csv" });
   document.body.append(a); a.click(); a.remove();
 }
