@@ -78,16 +78,16 @@ const LOGS = {
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
-      { key: "supplier", label: "Supplier", type: "text" },
+      { key: "supplier", label: "Supplier", ...SEL("PENRITH PRODUCTION","B&E","PFD","Midfield","SupplyDash","CPG","Sydney Direct","Three Pence Coffee","Asian") },
       { key: "item", label: "Item", ...SEL("BEEF","CHICKEN","PORK","SEAFOOD","OTHER") },
       { key: "temp", label: "Temp °C", type: "number" },
       { key: "best_before", label: "Best before", type: "date" },
       { key: "accept", label: "Accept", ...SEL("Y","N") },
       { key: "invoice_no", label: "Invoice no.", type: "text" },
       { key: "weight", label: "Weight kg", type: "number" },
-      { key: "receiver", label: "Receiver", type: "text" },
+      { key: "receiver", label: "Receiver", type: "employee" },
       { key: "driver", label: "Driver", type: "text" },
-      { key: "recorded_by", label: "Recorded by", type: "text" },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "corrective_action", label: "Corrective action", type: "textarea" }
     ]
   },
@@ -100,7 +100,7 @@ const LOGS = {
       { key: "area", label: "Area", ...SEL("FOH","BOH") },
       { key: "type", label: "Unit", ...SEL("Freezer","Fridge","Walk-in Coolroom Fridge","Walk-in Freezer") },
       { key: "temp", label: "Temp °C", type: "number" },
-      { key: "recorded_by", label: "Recorded by", type: "text" },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "corrective_action", label: "Corrective action", type: "textarea" }
     ],
     extraCols: ["within_range"]
