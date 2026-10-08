@@ -73,7 +73,7 @@ const LOGS = {
     columns: ["code","name","brand","location"]
   },
   deliveries: {
-    label: "Delivery", table: "deliveries",
+    label: "Delivery Temp Log", table: "deliveries",
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
@@ -92,7 +92,7 @@ const LOGS = {
     ]
   },
   fridge_freezer: {
-    label: "Fridge / Freezer", table: "fridge_freezer",
+    label: "Fridge/Freezer Temp Log", table: "fridge_freezer",
     fields: [
       { key: "entry_date", label: "Date", type: "today", req: true },
       { key: "entry_time", label: "Collection time", type: "select", options: [{ value: "10:00", label: "10:00 AM" }, { value: "17:00", label: "5:00 PM" }], req: true },
@@ -105,11 +105,11 @@ const LOGS = {
     ],
     extraCols: ["within_range"]
   },
-  process_mep:     procDef("Process — MEP", "MEP", { timeSlots: MEP_TIMES }),
-  process_risky:   procDef("Process — Risky", "Risky"),
-  process_freezer: procDef("Process — Freezer", "Freezer"),
+  process_mep:     procDef("Process - MEP Temp Log", "MEP", { timeSlots: MEP_TIMES }),
+  process_risky:   procDef("Process - Risky Temp Log", "Risky"),
+  process_freezer: procDef("Process - Freeze Temp Log", "Freezer"),
   food_waste: {
-    label: "Food Waste", table: "food_waste", totals: ["quantity","cost"],
+    label: "Food Wastage Log", table: "food_waste", totals: ["quantity","cost"],
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
@@ -192,25 +192,46 @@ async function boot() {
   tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
   $("#who").prepend(tag);
 
-  // Managers see the same tabs as a normal employee (plus leave-management
-  // powers inside the Leave tab); only admins get the admin-only Catalogue tab.
-  const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
-  navDefs.push({ id: "employees", label: "Employees" });
-  navDefs.push({ id: "order", label: "Order" });
-  if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
-  navDefs.push({ id: "leave", label: "Leave" });
-  navDefs.push({ id: "pestcon", label: "Pest Control" });
-  navDefs.push({ id: "msds", label: "MSDS" });
-  if (IS_ADMIN || IS_MANAGER) navDefs.push({ id: "cash", label: "Cash Sales" });
-  if (!navDefs.some(d => d.id === CURRENT)) CURRENT = navDefs[0].id;
+  const mgr = IS_ADMIN || IS_MANAGER;
+  // Grouped navigation. Each group has a header; items can be role-gated.
+  const groups = [
+    { header: null, items: [{ id: "employees", label: "Employee Input Portal" }] },
+    { header: "Daily Logs", items: [
+      { id: "deliveries", label: "Delivery Temp Log" },
+      { id: "fridge_freezer", label: "Fridge/Freezer Temp Log" },
+      { id: "process_mep", label: "Process - MEP Temp Log" },
+      { id: "process_risky", label: "Process - Risky Temp Log" },
+      { id: "process_freezer", label: "Process - Freeze Temp Log" },
+      { id: "food_waste", label: "Food Wastage Log" }
+    ]},
+    { header: "Documents & Requests", items: [
+      { id: "leave", label: "Leave" },
+      { id: "pestcon", label: "Pest Control Document" },
+      { id: "msds", label: "MSDS Document" }
+    ]},
+    { header: null, items: [{ id: "complaints", label: "Complaints / Suggestions Box" }] },
+    { header: "Manager Portal", show: mgr, items: [
+      { id: "cash", label: "Daily Cash Sales Log" },
+      { id: "order", label: "Site Order" }
+    ]},
+    { header: "Admin", show: IS_ADMIN, items: [
+      { id: "catalogue", label: "Catalogue" }
+    ]}
+  ];
+  const visible = groups.filter(g => g.show === undefined || g.show);
+  const allItems = visible.flatMap(g => g.items);
+  if (!allItems.some(d => d.id === CURRENT)) CURRENT = allItems[0].id;
 
+  function highlight() { [...nav.querySelectorAll("button")].forEach(btn => btn.classList.toggle("active", btn.dataset.id === CURRENT)); }
   nav.innerHTML = "";
-  navDefs.forEach(d => {
-    nav.append(el("button", {
-      textContent: d.label,
-      className: d.id === CURRENT ? "active" : "",
-      onclick: (e) => { CURRENT = d.id; [...nav.children].forEach(b => b.classList.remove("active")); e.currentTarget.classList.add("active"); openTab(d.id); }
-    }));
+  visible.forEach(g => {
+    if (g.header) nav.append(el("div", { className: "navhdr", textContent: g.header }));
+    g.items.forEach(d => {
+      const btn = el("button", { textContent: d.label, className: d.id === CURRENT ? "active" : "" });
+      btn.dataset.id = d.id;
+      btn.onclick = () => { CURRENT = d.id; highlight(); openTab(d.id); };
+      nav.append(btn);
+    });
   });
   openTab(CURRENT);
 }
@@ -233,6 +254,7 @@ function openTab(id) {
   if (id === "pestcon") return renderPestcon(view);
   if (id === "msds") return renderMSDS(view);
   if (id === "cash") return renderCashSales(view);
+  if (id === "complaints") return renderComplaints(view);
   if (id === "employees") return renderEmployees(view);
   return renderLog(id, view);
 }
@@ -1518,4 +1540,101 @@ function cashCSV() {
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "cash_sales_" + new Date().toISOString().slice(0,10) + ".csv" });
   document.body.append(a); a.click(); a.remove();
+}
+
+/* ===================== COMPLAINTS / SUGGESTIONS BOX ===================== */
+async function openPrivateFile(bucket, path) {
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 120);
+  if (error || !data) { alert("Couldn't open the file: " + (error ? error.message : "unknown error")); return; }
+  window.open(data.signedUrl, "_blank");
+}
+
+async function renderComplaints(view) {
+  view.innerHTML = "";
+
+  // submit form — everyone
+  const card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "Complaints / Suggestions Box" }));
+  const b = el("div", { className: "body" });
+  b.append(el("div", { className: "sub", textContent: "Share a complaint or suggestion. You can leave your name as Anonymous. Submissions are confidential and seen only by Head Office." }));
+  const grid = el("div", { className: "formgrid" });
+  const dateI = el("input", { type: "date" }); dateI.value = new Date().toLocaleDateString("en-CA"); dateI.disabled = true;
+  const nameI = el("input", { type: "text", placeholder: "Leave blank to stay anonymous" });
+  const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
+  grid.append(fieldWrap("Date", dateI), fieldWrap("Name (optional)", nameI), fieldWrap("Attachment (optional)", fileI));
+  b.append(grid);
+  const msgField = el("textarea", { maxLength: 3000, style: "min-height:120px" });
+  const counter = el("div", { className: "sub", style: "text-align:right", textContent: "0 / 3000" });
+  msgField.addEventListener("input", () => counter.textContent = msgField.value.length + " / 3000");
+  b.append(el("div", { className: "field" }, [el("label", { textContent: "Complaints / Suggestions" }), msgField, counter]));
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn", textContent: "Submit" });
+  b.append(el("div", { className: "actions" }, [save, msg]));
+  card.append(b); view.append(card);
+
+  save.onclick = async () => {
+    if (!msgField.value.trim()) { msg.textContent = "Please write your complaint or suggestion."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Submitting…"; msg.className = "msg";
+    const attachments = [];
+    const files = Array.from(fileI.files || []);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const path = Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+      const { error: upErr } = await sb.storage.from("complaints").upload(path, f);
+      if (upErr) { save.disabled = false; msg.textContent = "Attachment: " + upErr.message; msg.className = "msg err"; return; }
+      attachments.push({ path, name: f.name });
+    }
+    const { error } = await sb.from("complaints").insert([{
+      site_id: MY_SITE ? MY_SITE.id : null,
+      name: nameI.value.trim() || "Anonymous",
+      message: msgField.value.trim(),
+      attachments
+    }]);
+    save.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Submitted ✓ Thank you."; msg.className = "msg ok";
+    nameI.value = ""; msgField.value = ""; fileI.value = ""; counter.textContent = "0 / 3000";
+    if (IS_ADMIN) loadComplaints(listCard);
+  };
+
+  // list — ADMIN ONLY
+  if (!IS_ADMIN) return;
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Submissions" }));
+  listCard.append(el("div", { className: "body" }, el("div", { className: "tablewrap" })));
+  view.append(listCard);
+  loadComplaints(listCard);
+}
+
+async function loadComplaints(card) {
+  const tw = card.querySelector(".tablewrap");
+  tw.innerHTML = "<div class='empty'>Loading…</div>";
+  const { data, error } = await sb.from("complaints").select("*").order("created_at", { ascending: false }).limit(500);
+  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { tw.innerHTML = "<div class='empty'>No submissions yet.</div>"; return; }
+  const table = el("table");
+  table.append(el("thead", {}, el("tr", {}, ["Submitted","Name","Site","Complaint / Suggestion","Attachments","Action"].map(h => el("th", { textContent: h })))));
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const files = Array.isArray(r.attachments) ? r.attachments : [];
+    const fbox = el("div", { style: "display:flex;flex-direction:column;gap:3px" });
+    if (!files.length) fbox.append(el("span", { textContent: "—" }));
+    files.forEach((f, i) => fbox.append(el("button", { className: "btn ghost small", textContent: "Download " + (f.name || ("file " + (i+1))), onclick: () => openPrivateFile("complaints", f.path) })));
+    tb.append(el("tr", {}, [
+      el("td", { textContent: r.created_at ? new Date(r.created_at).toLocaleString() : "" }),
+      el("td", { textContent: r.name || "Anonymous" }),
+      el("td", { textContent: r.site_id ? allSiteName(r.site_id) : "" }),
+      el("td", { style: "white-space:normal;max-width:520px" }, r.message || ""),
+      el("td", {}, fbox),
+      el("td", {}, el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+        if (!confirm("Delete this submission?")) return;
+        for (const f of files) { try { await sb.storage.from("complaints").remove([f.path]); } catch (e) {} }
+        await sb.from("complaints").delete().eq("id", r.id);
+        loadComplaints(card);
+      }}))
+    ]));
+  });
+  table.append(tb);
+  tw.innerHTML = ""; tw.append(table);
 }
