@@ -1481,10 +1481,11 @@ async function renderCashAdmin(view) {
   const fSite = el("select");
   fSite.append(el("option", { value: "", textContent: "All sites" }));
   ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  const fMonth = monthSelect(true);
   const fFrom = el("input", { type: "date" }), fTo = el("input", { type: "date" });
-  filters.append(fieldWrap("Site", fSite), fieldWrap("From", fFrom), fieldWrap("To", fTo),
-    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadCashAdmin(listCard, { site: fSite.value, from: fFrom.value, to: fTo.value }) }),
-    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => cashCSV() }));
+  filters.append(fieldWrap("Site", fSite), fieldWrap("Month", fMonth), fieldWrap("From", fFrom), fieldWrap("To", fTo),
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadCashAdmin(listCard, { site: fSite.value, month: fMonth.value, from: fFrom.value, to: fTo.value }) }),
+    el("button", { className: "btn dark", textContent: "Download CSV", onclick: () => cashCSV() }));
   lb.append(filters);
   lb.append(el("div", { className: "tablewrap" }));
   listCard.append(lb); view.append(listCard);
@@ -1493,11 +1494,18 @@ async function renderCashAdmin(view) {
 }
 
 let CASH_ROWS = [];
+let CASH_FLT = {};
 async function loadCashAdmin(card, flt = {}) {
+  CASH_FLT = flt;
   const tw = card.querySelector(".tablewrap");
   tw.innerHTML = "<div class='empty'>Loading…</div>";
-  let q = sb.from("cash_sales").select("*").order("entry_date", { ascending: false }).limit(500);
+  let q = sb.from("cash_sales").select("*").order("entry_date", { ascending: false }).limit(2000);
   if (flt.site) q = q.eq("site_id", flt.site);
+  if (flt.month) {
+    const [yy, mm] = flt.month.split("-").map(Number);
+    const next = mm === 12 ? (yy + 1) + "-01-01" : yy + "-" + String(mm + 1).padStart(2, "0") + "-01";
+    q = q.gte("entry_date", flt.month + "-01").lt("entry_date", next);
+  }
   if (flt.from) q = q.gte("entry_date", flt.from);
   if (flt.to) q = q.lte("entry_date", flt.to);
   const { data, error } = await q;
@@ -1547,8 +1555,18 @@ function cashCSV() {
     r.cash_on_hand ?? "", r.actual_cash_lightspeed ?? "", cashDiffCash(r) ?? "", cashDiffLS(r) ?? "",
     r.manual_tyro ?? "", r.manual_tyro_reason || "", r.tab_square ?? "", r.bank_transfer ?? "", r.expenses ?? "", r.item || "", r.amount ?? ""
   ]);
+  // monthly TOTAL row across the money columns
+  const sum = k => CASH_ROWS.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const sumFn = fn => CASH_ROWS.reduce((a, r) => a + (Number(fn(r)) || 0), 0);
+  rows.push(["TOTAL","","","","",
+    sum("cash_on_hand").toFixed(2), sum("actual_cash_lightspeed").toFixed(2),
+    sumFn(cashDiffCash).toFixed(2), sumFn(cashDiffLS).toFixed(2),
+    sum("manual_tyro").toFixed(2), "", sum("tab_square").toFixed(2), sum("bank_transfer").toFixed(2),
+    sum("expenses").toFixed(2), "", sum("amount").toFixed(2)]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "cash_sales_" + new Date().toISOString().slice(0,10) + ".csv" });
+  const sitePart = CASH_FLT.site ? allSiteName(Number(CASH_FLT.site)).replace(/[^a-zA-Z0-9]+/g, "-") : "all-sites";
+  const monthPart = CASH_FLT.month || (CASH_FLT.from || "") || new Date().toISOString().slice(0,7);
+  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "cash_sales_" + sitePart + "_" + monthPart + ".csv" });
   document.body.append(a); a.click(); a.remove();
 }
 
