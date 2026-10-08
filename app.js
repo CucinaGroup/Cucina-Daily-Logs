@@ -106,6 +106,12 @@ let SITES = [];
 let MY_SITE = null;
 let MULTI = false;       // more than one site visible
 let IS_ADMIN = false;    // all-site admin login
+let IS_MANAGER = false;  // leave-only manager login
+let MGR_SITE = null;     // a manager's own site (they can only decide/delete this one)
+let ALL_SITES = [];      // full site list for the leave picker (via all_sites RPC)
+const canManageLeave = () => IS_ADMIN || IS_MANAGER;
+const canDecideLeave = (siteId) => IS_ADMIN || (IS_MANAGER && siteId === MGR_SITE);
+const allSiteName = id => { const s = ALL_SITES.find(x => x.id === id) || SITES.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : ("Site " + id); };
 let CURRENT = "deliveries";
 let booted = false;
 
@@ -145,22 +151,31 @@ async function boot() {
   if (booted) return; booted = true;
   await loadSites();
   try { const { data } = await sb.rpc("is_admin"); IS_ADMIN = !!data; } catch (e) { IS_ADMIN = false; }
+  try { const { data } = await sb.rpc("is_manager"); IS_MANAGER = !!data; } catch (e) { IS_MANAGER = false; }
+  if (IS_MANAGER) { try { const { data } = await sb.rpc("manager_site_id"); MGR_SITE = data || null; } catch (e) { MGR_SITE = null; } }
   const nav = $("#tabs");
-  if (!SITES.length && !IS_ADMIN) {
+  if (!SITES.length && !IS_ADMIN && !IS_MANAGER) {
     nav.innerHTML = "";
     $("#view").innerHTML = "<div class='card'><div class='body'>This login isn't linked to a site yet. Ask your manager to assign it in Supabase (site_logins) before entering data.</div></div>";
     return;
   }
   MY_SITE = SITES[0] || null;
   MULTI = SITES.length > 1;
-  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : (MY_SITE ? "Site: " + MY_SITE.name : "") });
+  const MANAGER_ONLY = IS_MANAGER && !IS_ADMIN;
+  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : MANAGER_ONLY ? "Leave manager" : (MY_SITE ? "Site: " + MY_SITE.name : "") });
   tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
   $("#who").prepend(tag);
 
-  const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
-  navDefs.push({ id: "order", label: "Order" });
-  if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
-  navDefs.push({ id: "leave", label: "Leave" });
+  let navDefs;
+  if (MANAGER_ONLY) {
+    navDefs = [{ id: "leave", label: "Leave" }];
+  } else {
+    navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
+    navDefs.push({ id: "order", label: "Order" });
+    if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
+    navDefs.push({ id: "leave", label: "Leave" });
+  }
+  if (!navDefs.some(d => d.id === CURRENT)) CURRENT = navDefs[0].id;
 
   nav.innerHTML = "";
   navDefs.forEach(d => {
@@ -740,34 +755,68 @@ async function renderOrderHistory(view) {
 
 
 /* ===================== LEAVE REQUESTS ===================== */
+// ---- Downloadable leave-form templates. Paste YOUR links here ----
+// Each url can be an external link (Google Drive, Dropbox, your website) or a
+// file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
+const LEAVE_TEMPLATES = [
+  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
+  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
+  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
+  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
+];
+
 async function renderLeave(view) {
   view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+  const managerOnly = IS_MANAGER && !IS_ADMIN;
+
+  if (!managerOnly) {
   const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "Submit a leave request" }));
+  card.append(el("h2", { textContent: "Apply for leave" }));
   const b = el("div", { className: "body" });
 
-  const grid = el("div", { className: "formgrid" });
-  let orderSite = (!IS_ADMIN && MY_SITE) ? MY_SITE.id : null;
-  let siteSel = null;
-  if (IS_ADMIN) {
-    siteSel = el("select");
-    siteSel.append(el("option", { value: "", textContent: "— site —" }));
-    SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-    siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; };
-    grid.append(fieldWrap("Site", siteSel));
+  // intro
+  const intro = el("div", { style: "background:var(--input-bg);border:1px solid #e4dfc4;border-radius:10px;padding:16px 20px;margin-bottom:14px" });
+  intro.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal is where you apply for leave. Download your company's leave form below, fill it in and sign it, then submit the request here and upload the signed form." }));
+  intro.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Head office will review your request. You can see the status — Pending, Approved or Declined — and the reason for the decision, right here in this tab." }));
+  b.append(intro);
+
+  // template downloads
+  const tpl = el("div", { style: "margin-bottom:16px" });
+  tpl.append(el("div", { className: "sub", style: "margin-bottom:6px", textContent: "Download your company's leave form:" }));
+  const tplRow = el("div", { style: "display:flex;flex-wrap:wrap;gap:10px" });
+  const liveTpl = LEAVE_TEMPLATES.filter(t => t.url && t.url !== "REPLACE_WITH_LINK");
+  if (liveTpl.length) {
+    liveTpl.forEach(t => tplRow.append(el("a", { className: "btn ghost small", href: t.url, target: "_blank", textContent: t.label })));
+  } else {
+    tplRow.append(el("span", { className: "sub", textContent: "(Form links not set yet — add them in app.js → LEAVE_TEMPLATES.)" }));
   }
+  tpl.append(tplRow);
+  b.append(tpl);
+
+  // form
+  const grid = el("div", { className: "formgrid" });
+  let orderSite = MY_SITE ? MY_SITE.id : null;
+  const siteSel = el("select");
+  siteSel.append(el("option", { value: "", textContent: "— choose site —" }));
+  ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  if (orderSite) siteSel.value = orderSite;
+  siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; };
+  grid.append(fieldWrap("Site (you can apply for any site)", siteSel));
   const nameI = el("input", { type: "text" });
   const typeI = el("select");
   ["Annual leave","Personal / carer's leave","Sick leave","Unpaid leave","Other"].forEach(o => typeI.append(el("option", { value: o, textContent: o })));
   const fromI = el("input", { type: "date" });
   const toI = el("input", { type: "date" });
   const reasonI = el("textarea");
+  const formI = el("input", { type: "file", accept: "application/pdf,image/*" });
   grid.append(
     fieldWrap("Your name", nameI),
     fieldWrap("Leave type", typeI),
     fieldWrap("From", fromI),
     fieldWrap("To", toI),
-    fieldWrap("Reason / notes", reasonI)
+    fieldWrap("Reason / notes", reasonI),
+    fieldWrap("Signed leave form (PDF or photo)", formI)
   );
   b.append(grid);
   const msg = el("span", { className: "msg" });
@@ -780,36 +829,54 @@ async function renderLeave(view) {
     if (!nameI.value.trim() || !fromI.value || !toI.value) { msg.textContent = "Name, From and To dates are required."; msg.className = "msg err"; return; }
     if (toI.value < fromI.value) { msg.textContent = "The 'To' date can't be before the 'From' date."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Submitting…"; msg.className = "msg";
+    let form_path = null;
+    const file = formI.files[0];
+    if (file) {
+      const path = orderSite + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "");
+      const { error: upErr } = await sb.storage.from("leave-forms").upload(path, file);
+      if (upErr) { save.disabled = false; msg.textContent = "Form upload: " + upErr.message; msg.className = "msg err"; return; }
+      form_path = path;
+    }
     const { error } = await sb.from("leave_requests").insert([{
       site_id: orderSite, staff_name: nameI.value.trim(), leave_type: typeI.value,
-      date_from: fromI.value, date_to: toI.value, reason: reasonI.value || null
+      date_from: fromI.value, date_to: toI.value, reason: reasonI.value || null, form_path
     }]);
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
     msg.textContent = "Submitted ✓"; msg.className = "msg ok";
-    nameI.value = ""; fromI.value = ""; toI.value = ""; reasonI.value = "";
+    nameI.value = ""; fromI.value = ""; toI.value = ""; reasonI.value = ""; formI.value = "";
     loadLeaveList(listCard);
   };
+
+  if (!canManageLeave()) {
+    b.append(el("div", { className: "sub", style: "margin-top:12px", textContent: "Your request goes to your manager and head office for review. Submitted leave is private — only managers and head office can see it." }));
+    return;
+  }
+  } // end !managerOnly submit card
 
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Leave requests" }));
   const lb = el("div", { className: "body" });
   const filters = el("div", { className: "filters" });
-  let fSite = null, fStatus = el("select");
+  let fStatus = el("select");
   ["", "Pending", "Approved", "Declined"].forEach(o => fStatus.append(el("option", { value: o, textContent: o || "All statuses" })));
-  if (IS_ADMIN) {
-    fSite = el("select");
-    fSite.append(el("option", { value: "", textContent: "All sites" }));
-    SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-    filters.append(fieldWrap("Site", fSite));
-  }
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  filters.append(fieldWrap("Site", fSite));
   filters.append(fieldWrap("Status", fStatus),
-    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadLeaveList(listCard, { site: fSite ? fSite.value : "", status: fStatus.value }) }),
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadLeaveList(listCard, { site: fSite.value, status: fStatus.value }) }),
     el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => leaveCSV() }));
   lb.append(filters);
   lb.append(el("div", { className: "tablewrap" }));
   listCard.append(lb); view.append(listCard);
   loadLeaveList(listCard);
+}
+
+async function viewLeaveForm(path) {
+  const { data, error } = await sb.storage.from("leave-forms").createSignedUrl(path, 120);
+  if (error || !data) { alert("Couldn't open the form: " + (error ? error.message : "unknown error")); return; }
+  window.open(data.signedUrl, "_blank");
 }
 
 let LEAVE_ROWS = [];
@@ -824,7 +891,7 @@ async function loadLeaveList(card, flt = {}) {
   LEAVE_ROWS = data || [];
   if (!LEAVE_ROWS.length) { tw.innerHTML = "<div class='empty'>No leave requests yet.</div>"; return; }
   const table = el("table");
-  const head = ["Submitted","Name"].concat(IS_ADMIN ? ["Site"] : []).concat(["Type","From","To","Reason","Status"]).concat(IS_ADMIN ? ["Action"] : []);
+  const head = ["Submitted","Name","Site","Type","From","To","Form","Status","Reason for decision","Action"];
   table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   LEAVE_ROWS.forEach(r => {
@@ -833,22 +900,36 @@ async function loadLeaveList(card, flt = {}) {
       el("td", { textContent: r.created_at ? new Date(r.created_at).toLocaleDateString() : "" }),
       el("td", { textContent: r.staff_name || "" })
     ];
-    if (IS_ADMIN) cells.push(el("td", { textContent: siteName(r.site_id) }));
+    cells.push(el("td", { textContent: allSiteName(r.site_id) }));
     cells.push(
       el("td", { textContent: r.leave_type || "" }),
       el("td", { textContent: r.date_from || "" }),
       el("td", { textContent: r.date_to || "" }),
-      el("td", { textContent: r.reason || "" }),
-      el("td", {}, el("span", { className: "badge " + sc, textContent: r.status || "Pending" }))
+      el("td", {}, r.form_path ? el("button", { className: "btn ghost small", textContent: "Download", onclick: () => viewLeaveForm(r.form_path) }) : el("span", { textContent: "—" })),
+      el("td", {}, el("span", { className: "badge " + sc, textContent: r.status || "Pending" })),
+      el("td", { textContent: r.admin_note || "" })
     );
-    if (IS_ADMIN) {
-      const approve = el("button", { className: "btn ghost small", textContent: "Approve", onclick: async () => {
-        await sb.from("leave_requests").update({ status: "Approved" }).eq("id", r.id); loadLeaveList(card, flt);
-      }});
-      const decline = el("button", { className: "btn ghost small", textContent: "Decline", onclick: async () => {
-        await sb.from("leave_requests").update({ status: "Declined" }).eq("id", r.id); loadLeaveList(card, flt);
-      }});
-      cells.push(el("td", {}, el("div", { style: "display:flex;gap:6px" }, [approve, decline])));
+    if (canDecideLeave(r.site_id)) {
+      const note = el("input", { type: "text", placeholder: "Reason (shown to staff)", style: "min-width:150px" });
+      note.value = r.admin_note || "";
+      async function setStatus(st) {
+        await sb.from("leave_requests").update({ status: st, admin_note: note.value || null }).eq("id", r.id);
+        loadLeaveList(card, flt);
+      }
+      const wrap = el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" }, [
+        note,
+        el("button", { className: "btn ghost small", textContent: "Approve", onclick: () => setStatus("Approved") }),
+        el("button", { className: "btn ghost small", textContent: "Decline", onclick: () => setStatus("Declined") }),
+        el("button", { className: "btn ghost small", textContent: "Pending", onclick: () => setStatus("Pending") }),
+        el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+          if (!confirm("Delete this leave request?")) return;
+          await sb.from("leave_requests").delete().eq("id", r.id);
+          loadLeaveList(card, flt);
+        }})
+      ]);
+      cells.push(el("td", {}, wrap));
+    } else {
+      cells.push(el("td", {}, el("span", { className: "sub", textContent: "View only" })));
     }
     tb.append(el("tr", {}, cells));
   });
@@ -858,10 +939,10 @@ async function loadLeaveList(card, flt = {}) {
 
 function leaveCSV() {
   if (!LEAVE_ROWS.length) return;
-  const head = ["Submitted","Name","Site","Type","From","To","Reason","Status"];
+  const head = ["Submitted","Name","Site","Type","From","To","Status","Reason for decision","Signed form"];
   const rows = LEAVE_ROWS.map(r => [
-    r.created_at ? new Date(r.created_at).toLocaleString() : "", r.staff_name || "", siteName(r.site_id),
-    r.leave_type || "", r.date_from || "", r.date_to || "", r.reason || "", r.status || "Pending"
+    r.created_at ? new Date(r.created_at).toLocaleString() : "", r.staff_name || "", allSiteName(r.site_id),
+    r.leave_type || "", r.date_from || "", r.date_to || "", r.status || "Pending", r.admin_note || "", r.form_path ? "yes" : "no"
   ]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "leave_" + new Date().toISOString().slice(0,10) + ".csv" });
