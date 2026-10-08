@@ -19,18 +19,44 @@ const sb = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
 /* ===================== LOG DEFINITIONS ===================== */
 const SEL = (...o) => ({ type: "select", options: o });
-function procDef(label, category) {
+// A time-of-day dropdown (every 30 min, 6:00 AM–11:30 PM) so staff pick, never type.
+const TIME_OPTIONS = (() => {
+  const out = [];
+  for (let m = 6 * 60; m <= 23 * 60 + 30; m += 30) {
+    const h = Math.floor(m / 60), mm = m % 60;
+    const val = String(h).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+    const ap = h < 12 ? "AM" : "PM";
+    const h12 = ((h + 11) % 12) + 1;
+    out.push({ value: val, label: h12 + ":" + String(mm).padStart(2, "0") + " " + ap });
+  }
+  return out;
+})();
+const MEP_TIMES = [
+  { value: "10:00", label: "10:00 AM" },
+  { value: "17:00", label: "5:00 PM" },
+  { value: "21:00", label: "9:00 PM" }
+];
+// One shared, alphabetical item list for ALL process logs.
+const PROCESS_ITEMS = Array.from(new Set([
+  "Chicken Inasal","Chicken Bone-In","Chicken Tenders","Chicken Soup","Sinigang","Gravy","Mash","Corn","Beans","Bacon","Pulled Pork","Mushroom Gravy","Cheese Sauce","Spaghetti Sauce","Karekare sauce","Pata","Rice","Crispy Bagnet","Grilled Pork Belly",
+  "Slaw","Capsicum","Onion","Garlic","Egg","Shallots","Diced Tomatoes","Pickles","Cheese","Mayo","Beetroot","Sweet Tea","Traditional Lemonade","Strawberry Lemonade","Pure Strawberry Puree","Black Tea","Lettuce",
+  "Crinkled Cut Fries","Shoestring Fries","Vanilla Ice Cream","Chocolate Ice Cream","Strawberry Ice Cream","Ube Ice Cream"
+])).sort((a, b) => a.localeCompare(b));
+
+function procDef(label, category, opts = {}) {
+  const timeField = opts.timeSlots
+    ? { key: "entry_time", label: "Collection time", type: "select", options: opts.timeSlots, req: true }
+    : { key: "entry_time", label: "Time", type: "select", options: TIME_OPTIONS, req: true };
   return {
     label, table: "process_logs", fixed: { category },
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
-      { key: "entry_time", label: "Time", type: "time" },
+      timeField,
       { key: "site_id", label: "Site", type: "site", req: true },
-      { key: "food_item", label: "Food item", type: "text" },
+      { key: "food_item", label: "Food item", type: "select", options: PROCESS_ITEMS },
       { key: "process", label: "Process", ...SEL("Cook","Reheat","Hot Holding","Cooling") },
-      { key: "process_time", label: "Time", type: "text" },
       { key: "temp", label: "Temp °C", type: "number" },
-      { key: "recorded_by", label: "Recorded by", type: "text" },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "corrective_action", label: "Corrective action", type: "textarea" }
     ]
   };
@@ -68,19 +94,18 @@ const LOGS = {
   fridge_freezer: {
     label: "Fridge / Freezer", table: "fridge_freezer",
     fields: [
-      { key: "entry_date", label: "Date", type: "date", req: true },
-      { key: "entry_time", label: "Time", type: "time" },
+      { key: "entry_date", label: "Date", type: "today", req: true },
+      { key: "entry_time", label: "Collection time", type: "select", options: [{ value: "10:00", label: "10:00 AM" }, { value: "17:00", label: "5:00 PM" }], req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "area", label: "Area", ...SEL("FOH","BOH") },
-      { key: "unit", label: "Unit / appliance", type: "text" },
-      { key: "type", label: "Type", ...SEL("Fridge","Freezer") },
+      { key: "type", label: "Unit", ...SEL("Freezer","Fridge","Walk-in Coolroom Fridge","Walk-in Freezer") },
       { key: "temp", label: "Temp °C", type: "number" },
       { key: "recorded_by", label: "Recorded by", type: "text" },
       { key: "corrective_action", label: "Corrective action", type: "textarea" }
     ],
     extraCols: ["within_range"]
   },
-  process_mep:     procDef("Process — MEP", "MEP"),
+  process_mep:     procDef("Process — MEP", "MEP", { timeSlots: MEP_TIMES }),
   process_risky:   procDef("Process — Risky", "Risky"),
   process_freezer: procDef("Process — Freezer", "Freezer"),
   food_waste: {
@@ -109,6 +134,7 @@ let IS_ADMIN = false;    // all-site admin login
 let IS_MANAGER = false;  // leave-only manager login
 let MGR_SITE = null;     // a manager's own site (they can only decide/delete this one)
 let ALL_SITES = [];      // full site list for the leave picker (via all_sites RPC)
+let EMPLOYEES = [];      // name roster for the Recorded-by dropdowns
 const canManageLeave = () => IS_ADMIN || IS_MANAGER;
 const canDecideLeave = (siteId) => IS_ADMIN || (IS_MANAGER && siteId === MGR_SITE);
 const allSiteName = id => { const s = ALL_SITES.find(x => x.id === id) || SITES.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : ("Site " + id); };
@@ -150,6 +176,7 @@ $("#password").addEventListener("keydown", e => { if (e.key === "Enter") doSignI
 async function boot() {
   if (booted) return; booted = true;
   await loadSites();
+  await loadEmployees();
   try { const { data } = await sb.rpc("is_admin"); IS_ADMIN = !!data; } catch (e) { IS_ADMIN = false; }
   try { const { data } = await sb.rpc("is_manager"); IS_MANAGER = !!data; } catch (e) { IS_MANAGER = false; }
   if (IS_MANAGER) { try { const { data } = await sb.rpc("manager_site_id"); MGR_SITE = data || null; } catch (e) { MGR_SITE = null; } }
@@ -168,6 +195,7 @@ async function boot() {
   // Managers see the same tabs as a normal employee (plus leave-management
   // powers inside the Leave tab); only admins get the admin-only Catalogue tab.
   const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
+  navDefs.push({ id: "employees", label: "Employees" });
   navDefs.push({ id: "order", label: "Order" });
   if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
   navDefs.push({ id: "leave", label: "Leave" });
@@ -201,6 +229,7 @@ function openTab(id) {
   if (id === "catalogue") return renderCatalogue(view);
   if (id === "leave") return renderLeave(view);
   if (id === "pestcon") return renderPestcon(view);
+  if (id === "employees") return renderEmployees(view);
   return renderLog(id, view);
 }
 
@@ -219,7 +248,15 @@ function renderLog(id, view) {
     let input;
     if (f.type === "select") {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
-      f.options.forEach(o => input.append(el("option", { value: o, textContent: o })));
+      f.options.forEach(o => { const v = (o && typeof o === "object") ? o.value : o; const t = (o && typeof o === "object") ? o.label : o; input.append(el("option", { value: v, textContent: t })); });
+    } else if (f.type === "today") {
+      input = el("input", { type: "date" });
+      input.value = new Date().toLocaleDateString("en-CA");
+      input.disabled = true;
+    } else if (f.type === "employee") {
+      input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
+      const list = IS_ADMIN ? EMPLOYEES : EMPLOYEES.filter(x => MY_SITE && x.site_id === MY_SITE.id);
+      list.forEach(x => input.append(el("option", { value: x.name, textContent: x.name })));
     } else if (f.type === "site") {
       input = el("select");
       if (MULTI || IS_ADMIN) input.append(el("option", { value: "", textContent: "—" }));
@@ -286,7 +323,7 @@ function renderLog(id, view) {
 function tableColumns(def) {
   if (def.isSites) return def.columns.map(k => ({ key: k, label: k }));
   const cols = def.fields.map(f => ({ key: f.key, label: f.label }));
-  (def.extraCols || []).forEach(k => cols.splice(7, 0, { key: k, label: "Within range" }));
+  (def.extraCols || []).forEach(k => cols.splice(6, 0, { key: k, label: "Within range" }));
   return cols;
 }
 
@@ -1071,4 +1108,78 @@ async function loadPestconList(card, flt = {}) {
   });
   table.append(tb);
   tw.innerHTML = ""; tw.append(table);
+}
+
+/* ===================== EMPLOYEES (name roster) ===================== */
+async function loadEmployees() {
+  const { data } = await sb.from("employees").select("*").eq("active", true).order("name");
+  EMPLOYEES = data || [];
+}
+
+async function renderEmployees(view) {
+  view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+
+  const card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "Add your name" }));
+  const b = el("div", { className: "body" });
+  b.append(el("div", { className: "sub", textContent: "Add team members here so their names appear in the 'Recorded by' dropdown on the Process logs." }));
+  const grid = el("div", { className: "formgrid" });
+  const nameI = el("input", { type: "text" });
+  const siteSel = el("select");
+  siteSel.append(el("option", { value: "", textContent: "— site —" }));
+  ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  if (MY_SITE) siteSel.value = MY_SITE.id;
+  grid.append(fieldWrap("Name", nameI), fieldWrap("Site", siteSel));
+  b.append(grid);
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn", textContent: "Add" });
+  b.append(el("div", { className: "actions" }, [save, msg]));
+  card.append(b); view.append(card);
+
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Team" }));
+  listCard.append(el("div", { className: "body" }));
+  view.append(listCard);
+  loadEmployeeList(listCard);
+
+  save.onclick = async () => {
+    const name = nameI.value.trim();
+    const site_id = Number(siteSel.value);
+    if (!name || !site_id) { msg.textContent = "Name and site are required."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const { error } = await sb.from("employees").insert([{ name, site_id }]);
+    save.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Added ✓"; msg.className = "msg ok";
+    nameI.value = "";
+    await loadEmployees();
+    loadEmployeeList(listCard);
+  };
+}
+
+async function loadEmployeeList(card) {
+  const body = card.querySelector(".body");
+  body.innerHTML = "<div class='empty'>Loading…</div>";
+  const { data, error } = await sb.from("employees").select("*").eq("active", true).order("name");
+  if (error) { body.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = (data || []).filter(e => IS_ADMIN || (MY_SITE && e.site_id === MY_SITE.id));
+  if (!rows.length) { body.innerHTML = "<div class='empty'>No team members yet.</div>"; return; }
+  const table = el("table");
+  table.append(el("thead", {}, el("tr", {}, ["Name","Site",""].map(h => el("th", { textContent: h })))));
+  const tb = el("tbody");
+  rows.forEach(e => {
+    tb.append(el("tr", {}, [
+      el("td", { textContent: e.name }),
+      el("td", { textContent: allSiteName(e.site_id) }),
+      el("td", {}, el("button", { className: "btn ghost small", textContent: "Remove", onclick: async () => {
+        if (!confirm("Remove " + e.name + "?")) return;
+        await sb.from("employees").update({ active: false }).eq("id", e.id);
+        await loadEmployees();
+        loadEmployeeList(card);
+      }}))
+    ]));
+  });
+  table.append(tb);
+  body.innerHTML = ""; body.append(el("div", { className: "tablewrap" }, table));
 }
