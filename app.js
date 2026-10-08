@@ -114,9 +114,9 @@ const LOGS = {
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
-      { key: "recorded_by", label: "Recorded by", type: "text" },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "item_description", label: "Item description", type: "text" },
-      { key: "loss_reason", label: "Loss reason", type: "text" },
+      { key: "loss_reason", label: "Loss reason", ...SEL("Closing","Leftover","Spoiled") },
       { key: "quantity", label: "Quantity", type: "number" },
       { key: "unit", label: "Unit", ...SEL("kg","L","ea") },
       { key: "cost", label: "Cost $", type: "number" },
@@ -200,6 +200,8 @@ async function boot() {
   if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
   navDefs.push({ id: "leave", label: "Leave" });
   navDefs.push({ id: "pestcon", label: "Pest Control" });
+  navDefs.push({ id: "msds", label: "MSDS" });
+  if (IS_ADMIN || IS_MANAGER) navDefs.push({ id: "cash", label: "Cash Sales" });
   if (!navDefs.some(d => d.id === CURRENT)) CURRENT = navDefs[0].id;
 
   nav.innerHTML = "";
@@ -229,6 +231,8 @@ function openTab(id) {
   if (id === "catalogue") return renderCatalogue(view);
   if (id === "leave") return renderLeave(view);
   if (id === "pestcon") return renderPestcon(view);
+  if (id === "msds") return renderMSDS(view);
+  if (id === "cash") return renderCashSales(view);
   if (id === "employees") return renderEmployees(view);
   return renderLog(id, view);
 }
@@ -838,7 +842,9 @@ async function renderLeave(view) {
   if (orderSite) siteSel.value = orderSite;
   siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; };
   grid.append(fieldWrap("Site (you can apply for any site)", siteSel));
-  const nameI = el("input", { type: "text" });
+  const nameI = el("select");
+  nameI.append(el("option", { value: "", textContent: "— your name —" }));
+  Array.from(new Set(EMPLOYEES.map(e => e.name))).sort((x, y) => x.localeCompare(y)).forEach(n => nameI.append(el("option", { value: n, textContent: n })));
   const typeI = el("select");
   ["Annual leave","Personal / carer's leave","Sick leave","Unpaid leave","Other"].forEach(o => typeI.append(el("option", { value: o, textContent: o })));
   const fromI = el("input", { type: "date" });
@@ -1016,7 +1022,8 @@ async function renderPestcon(view) {
 
   const intro = el("div", { className: "card" });
   const ib = el("div", { className: "body" });
-  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Monthly pest-control records for each site. Choose a site to view and download its reports. Head office uploads the reports here each month as proof of regular pest control." }));
+  ib.append(el("p", { style: "margin:0 0 6px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal provides access to the monthly Pest Control reports for each restaurant site." }));
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Please select the relevant site below and download the Pest Control report for the month you require." }));
   intro.append(ib); view.append(intro);
 
   // admin upload
@@ -1182,4 +1189,333 @@ async function loadEmployeeList(card) {
   });
   table.append(tb);
   body.innerHTML = ""; body.append(el("div", { className: "tablewrap" }, table));
+}
+
+/* ===================== MSDS (Material Safety Data Sheets) ===================== */
+async function renderMSDS(view) {
+  view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+
+  const intro = el("div", { className: "card" });
+  const ib = el("div", { className: "body" });
+  ib.append(el("p", { style: "margin:0 0 6px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal provides access to the Material Safety Data Sheets (MSDS) for each restaurant site." }));
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Please select the relevant site below and download the MSDS file for the chemical or product you require." }));
+  intro.append(ib); view.append(intro);
+
+  if (IS_ADMIN) {
+    const card = el("div", { className: "card" });
+    card.append(el("h2", { textContent: "Upload MSDS" }));
+    const b = el("div", { className: "body" });
+    const grid = el("div", { className: "formgrid" });
+    const siteSel = el("select");
+    siteSel.append(el("option", { value: "", textContent: "— site —" }));
+    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    const titleI = el("input", { type: "text" });
+    const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
+    grid.append(fieldWrap("Site", siteSel), fieldWrap("Chemical / product name", titleI), fieldWrap("File(s)", fileI));
+    b.append(grid);
+    const msg = el("span", { className: "msg" });
+    const save = el("button", { className: "btn", textContent: "Upload" });
+    b.append(el("div", { className: "actions" }, [save, msg]));
+    card.append(b); view.append(card);
+
+    save.onclick = async () => {
+      const site_id = Number(siteSel.value);
+      const files = Array.from(fileI.files || []);
+      if (!site_id || !files.length) { msg.textContent = "Choose a site and at least one file."; msg.className = "msg err"; return; }
+      save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+        const { error: upErr } = await sb.storage.from("msds").upload(path, f);
+        if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
+        const { error } = await sb.from("msds").insert([{ site_id, title: titleI.value || f.name, file_path: path }]);
+        if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
+      }
+      save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
+      titleI.value = ""; fileI.value = "";
+      loadMSDSList(listCard, { site: siteSel.value });
+    };
+  }
+
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Safety data sheets" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  filters.append(fieldWrap("Site", fSite),
+    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadMSDSList(listCard, { site: fSite.value }) }));
+  lb.append(filters);
+  lb.append(el("div", { className: "tablewrap" }));
+  listCard.append(lb); view.append(listCard);
+  loadMSDSList(listCard);
+}
+
+async function loadMSDSList(card, flt = {}) {
+  const tw = card.querySelector(".tablewrap");
+  tw.innerHTML = "<div class='empty'>Loading…</div>";
+  let q = sb.from("msds").select("*").order("title").limit(1000);
+  if (flt.site) q = q.eq("site_id", flt.site);
+  const { data, error } = await q;
+  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { tw.innerHTML = "<div class='empty'>No MSDS files yet.</div>"; return; }
+  const table = el("table");
+  const head = ["Chemical / product","Site","File"].concat(IS_ADMIN ? ["Action"] : []);
+  table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const url = sb.storage.from("msds").getPublicUrl(r.file_path).data.publicUrl;
+    const cells = [
+      el("td", { textContent: r.title || "" }),
+      el("td", { textContent: allSiteName(r.site_id) }),
+      el("td", {}, el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Download" }))
+    ];
+    if (IS_ADMIN) {
+      cells.push(el("td", {}, el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+        if (!confirm("Delete this MSDS?")) return;
+        await sb.storage.from("msds").remove([r.file_path]);
+        await sb.from("msds").delete().eq("id", r.id);
+        loadMSDSList(card, flt);
+      }})));
+    }
+    tb.append(el("tr", {}, cells));
+  });
+  table.append(tb);
+  tw.innerHTML = ""; tw.append(table);
+}
+
+/* ===================== DAILY CASH SALES (managers + admin) ===================== */
+const money = v => (v === null || v === undefined || v === "") ? "" : "$" + Number(v).toFixed(2);
+function cashDiffCash(r) { return (r.cash_on_hand != null && r.actual_cash_lightspeed != null) ? Number(r.cash_on_hand) - Number(r.actual_cash_lightspeed) : null; }
+function cashDiffLS(r) { return (r.actual_cash_lightspeed != null) ? Number(r.actual_cash_lightspeed) - ((Number(r.manual_tyro) || 0) + (Number(r.tab_square) || 0) + (Number(r.bank_transfer) || 0)) : null; }
+function empSelect(initial) {
+  const sel = el("select");
+  sel.append(el("option", { value: "", textContent: "— name —" }));
+  Array.from(new Set(EMPLOYEES.map(e => e.name))).sort((x, y) => x.localeCompare(y)).forEach(n => sel.append(el("option", { value: n, textContent: n })));
+  if (initial) sel.value = initial;
+  return sel;
+}
+const CASH_NUM = new Set(["cash_on_hand","actual_cash_lightspeed","manual_tyro","tab_square","bank_transfer","expenses","amount"]);
+
+async function renderCashSales(view) {
+  view.innerHTML = "";
+  const isAdmin = IS_ADMIN;
+
+  if (isAdmin) return renderCashAdmin(view);
+  return renderCashManager(view);
+}
+
+/* ---------- Manager view: on-hand only ---------- */
+async function renderCashManager(view) {
+  const card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "Daily cash — enter today's cash on hand" }));
+  const b = el("div", { className: "body" });
+  const grid = el("div", { className: "formgrid" });
+  const dateI = el("input", { type: "date" }); dateI.value = new Date().toLocaleDateString("en-CA"); dateI.disabled = true;
+  const closedBy = empSelect();
+  const cashI = el("input", { type: "number", step: "0.01" });
+  grid.append(fieldWrap("Date", dateI), fieldWrap("Closed by", closedBy), fieldWrap("Cash Sales (On Hand)", cashI));
+  b.append(grid);
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn", textContent: "Save entry" });
+  b.append(el("div", { className: "actions" }, [save, msg]));
+  card.append(b); view.append(card);
+
+  save.onclick = async () => {
+    if (cashI.value === "") { msg.textContent = "Enter the cash on hand."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const { error } = await sb.rpc("cash_manager_insert", { p_date: dateI.value, p_closed_by: closedBy.value || null, p_cash: Number(cashI.value) });
+    save.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Saved ✓"; msg.className = "msg ok"; cashI.value = "";
+    loadCashManager(listCard);
+  };
+
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Daily cash" }));
+  listCard.append(el("div", { className: "body" }, el("div", { className: "tablewrap" })));
+  view.append(listCard);
+  loadCashManager(listCard);
+}
+
+async function loadCashManager(card) {
+  const tw = card.querySelector(".tablewrap");
+  tw.innerHTML = "<div class='empty'>Loading…</div>";
+  const { data, error } = await sb.from("cash_sales").select("*").order("entry_date", { ascending: false }).limit(500);
+  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
+  const table = el("table");
+  table.append(el("thead", {}, el("tr", {}, ["Date","Closed by","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Save"].map(h => el("th", { textContent: h })))));
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:110px" });
+    const m = el("span", { className: "msg" });
+    tb.append(el("tr", {}, [
+      el("td", { textContent: r.entry_date || "" }),
+      el("td", { textContent: r.closed_by || "" }),
+      el("td", {}, inp),
+      el("td", { textContent: money(r.actual_cash_lightspeed) }),
+      el("td", { textContent: money(cashDiffCash(r)) }),
+      el("td", { textContent: money(cashDiffLS(r)) }),
+      el("td", {}, el("button", { className: "btn ghost small", textContent: "Save", onclick: async () => {
+        const { error } = await sb.rpc("cash_manager_set_onhand", { p_id: r.id, p_cash: inp.value === "" ? null : Number(inp.value) });
+        m.textContent = error ? "!" : "✓"; m.className = "msg " + (error ? "err" : "ok");
+        loadCashManager(card);
+      }}), m)
+    ]));
+  });
+  table.append(tb);
+  tw.innerHTML = ""; tw.append(table);
+}
+
+/* ---------- Admin view: all columns ---------- */
+const CASH_FIELDS = [
+  { k: "entry_date", label: "Date", type: "date" },
+  { k: "closed_by", label: "Closed by", type: "employee" },
+  { k: "remarks", label: "Remarks", type: "text" },
+  { k: "cash_on_hand", label: "Cash Sales (On Hand)", type: "number" },
+  { k: "actual_cash_lightspeed", label: "Actual Cash (Lightspeed)", type: "number" },
+  { k: "manual_tyro", label: "Manual Tyro", type: "number" },
+  { k: "manual_tyro_reason", label: "Manual Tyro reason", type: "text" },
+  { k: "tab_square", label: "Tab Square (if available)", type: "number" },
+  { k: "bank_transfer", label: "Bank Transfer", type: "number" },
+  { k: "expenses", label: "Expenses", type: "number" },
+  { k: "item", label: "Item", type: "text" },
+  { k: "amount", label: "Amount", type: "number" }
+];
+
+async function renderCashAdmin(view) {
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+  let editingId = null;
+
+  const card = el("div", { className: "card" });
+  const h = el("h2", { textContent: "New cash entry" });
+  card.append(h);
+  const b = el("div", { className: "body" });
+  const grid = el("div", { className: "formgrid" });
+  const siteSel = el("select");
+  siteSel.append(el("option", { value: "", textContent: "— site —" }));
+  ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  grid.append(fieldWrap("Site", siteSel));
+  const inputs = {};
+  CASH_FIELDS.forEach(f => {
+    let input;
+    if (f.type === "employee") input = empSelect();
+    else { input = el("input", { type: f.type === "number" ? "number" : f.type }); if (f.type === "number") input.step = "0.01"; }
+    if (f.k === "entry_date") input.value = new Date().toLocaleDateString("en-CA");
+    inputs[f.k] = input; grid.append(fieldWrap(f.label, input));
+  });
+  b.append(grid);
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn", textContent: "Save entry" });
+  const cancel = el("button", { className: "btn ghost", textContent: "Clear", onclick: () => resetForm() });
+  b.append(el("div", { className: "actions" }, [save, cancel, msg]));
+  card.append(b); view.append(card);
+
+  function resetForm() {
+    editingId = null; h.textContent = "New cash entry"; save.textContent = "Save entry";
+    siteSel.value = ""; CASH_FIELDS.forEach(f => inputs[f.k].value = "");
+    inputs.entry_date.value = new Date().toLocaleDateString("en-CA");
+  }
+  function loadIntoForm(r) {
+    editingId = r.id; h.textContent = "Edit cash entry"; save.textContent = "Update entry";
+    siteSel.value = r.site_id || "";
+    CASH_FIELDS.forEach(f => inputs[f.k].value = r[f.k] != null ? r[f.k] : "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  save.onclick = async () => {
+    const site_id = Number(siteSel.value);
+    if (!site_id || !inputs.entry_date.value) { msg.textContent = "Site and Date are required."; msg.className = "msg err"; return; }
+    const row = { site_id };
+    CASH_FIELDS.forEach(f => { let v = inputs[f.k].value; if (v === "") v = null; else if (CASH_NUM.has(f.k)) v = Number(v); row[f.k] = v; });
+    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const res = editingId
+      ? await sb.from("cash_sales").update(row).eq("id", editingId)
+      : await sb.from("cash_sales").insert([row]);
+    save.disabled = false;
+    if (res.error) { msg.textContent = res.error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Saved ✓"; msg.className = "msg ok"; resetForm();
+    loadCashAdmin(listCard, { site: fSite ? fSite.value : "" });
+  };
+
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Daily cash sales" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  const fFrom = el("input", { type: "date" }), fTo = el("input", { type: "date" });
+  filters.append(fieldWrap("Site", fSite), fieldWrap("From", fFrom), fieldWrap("To", fTo),
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadCashAdmin(listCard, { site: fSite.value, from: fFrom.value, to: fTo.value }) }),
+    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => cashCSV() }));
+  lb.append(filters);
+  lb.append(el("div", { className: "tablewrap" }));
+  listCard.append(lb); view.append(listCard);
+  window._cashLoadInto = loadIntoForm;
+  loadCashAdmin(listCard);
+}
+
+let CASH_ROWS = [];
+async function loadCashAdmin(card, flt = {}) {
+  const tw = card.querySelector(".tablewrap");
+  tw.innerHTML = "<div class='empty'>Loading…</div>";
+  let q = sb.from("cash_sales").select("*").order("entry_date", { ascending: false }).limit(500);
+  if (flt.site) q = q.eq("site_id", flt.site);
+  if (flt.from) q = q.gte("entry_date", flt.from);
+  if (flt.to) q = q.lte("entry_date", flt.to);
+  const { data, error } = await q;
+  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  CASH_ROWS = data || [];
+  if (!CASH_ROWS.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
+  const cols = ["Date","Site","Closed by","Remarks","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Manual Tyro","Manual Tyro reason","Tab Square","Bank Transfer","Expenses","Item","Amount","Action"];
+  const table = el("table");
+  table.append(el("thead", {}, el("tr", {}, cols.map(c => el("th", { textContent: c })))));
+  const tb = el("tbody");
+  CASH_ROWS.forEach(r => {
+    tb.append(el("tr", {}, [
+      el("td", { textContent: r.entry_date || "" }),
+      el("td", { textContent: allSiteName(r.site_id) }),
+      el("td", { textContent: r.closed_by || "" }),
+      el("td", { textContent: r.remarks || "" }),
+      el("td", { textContent: money(r.cash_on_hand) }),
+      el("td", { textContent: money(r.actual_cash_lightspeed) }),
+      el("td", { textContent: money(cashDiffCash(r)) }),
+      el("td", { textContent: money(cashDiffLS(r)) }),
+      el("td", { textContent: money(r.manual_tyro) }),
+      el("td", { textContent: r.manual_tyro_reason || "" }),
+      el("td", { textContent: money(r.tab_square) }),
+      el("td", { textContent: money(r.bank_transfer) }),
+      el("td", { textContent: money(r.expenses) }),
+      el("td", { textContent: r.item || "" }),
+      el("td", { textContent: money(r.amount) }),
+      el("td", {}, el("div", { style: "display:flex;gap:6px" }, [
+        el("button", { className: "btn ghost small", textContent: "Edit", onclick: () => window._cashLoadInto(r) }),
+        el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+          if (!confirm("Delete this entry?")) return;
+          await sb.from("cash_sales").delete().eq("id", r.id); loadCashAdmin(card, flt);
+        }})
+      ]))
+    ]));
+  });
+  table.append(tb);
+  tw.innerHTML = ""; tw.append(table);
+}
+
+function cashCSV() {
+  if (!CASH_ROWS.length) return;
+  const head = ["Date","Site","Closed by","Remarks","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Manual Tyro","Manual Tyro reason","Tab Square","Bank Transfer","Expenses","Item","Amount"];
+  const rows = CASH_ROWS.map(r => [
+    r.entry_date || "", allSiteName(r.site_id), r.closed_by || "", r.remarks || "",
+    r.cash_on_hand ?? "", r.actual_cash_lightspeed ?? "", cashDiffCash(r) ?? "", cashDiffLS(r) ?? "",
+    r.manual_tyro ?? "", r.manual_tyro_reason || "", r.tab_square ?? "", r.bank_transfer ?? "", r.expenses ?? "", r.item || "", r.amount ?? ""
+  ]);
+  const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "cash_sales_" + new Date().toISOString().slice(0,10) + ".csv" });
+  document.body.append(a); a.click(); a.remove();
 }
