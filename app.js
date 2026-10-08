@@ -960,6 +960,19 @@ function leaveCSV() {
 }
 
 /* ===================== PEST CONTROL ===================== */
+function monthSelect(includeAll) {
+  const sel = el("select");
+  if (includeAll) sel.append(el("option", { value: "", textContent: "All months" }));
+  const names = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const y = now.getFullYear(), m = now.getMonth() - i;
+    const d = new Date(y, m, 1);
+    const val = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    sel.append(el("option", { value: val, textContent: names[d.getMonth()] + " " + d.getFullYear() }));
+  }
+  return sel;
+}
 async function renderPestcon(view) {
   view.innerHTML = "";
   try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
@@ -978,7 +991,7 @@ async function renderPestcon(view) {
     const siteSel = el("select");
     siteSel.append(el("option", { value: "", textContent: "— site —" }));
     ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-    const monthI = el("input", { type: "month" }); monthI.value = new Date().toISOString().slice(0,7);
+    const monthI = monthSelect(false);
     const titleI = el("input", { type: "text" });
     const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
     grid.append(fieldWrap("Site", siteSel), fieldWrap("Month", monthI), fieldWrap("Title / provider", titleI), fieldWrap("File(s)", fileI));
@@ -1015,7 +1028,7 @@ async function renderPestcon(view) {
   const fSite = el("select");
   fSite.append(el("option", { value: "", textContent: "All sites" }));
   ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-  const fMonth = el("input", { type: "month" });
+  const fMonth = monthSelect(true);
   filters.append(fieldWrap("Site", fSite), fieldWrap("Month", fMonth),
     el("button", { className: "btn ghost", textContent: "View", onclick: () => loadPestconList(listCard, { site: fSite.value, month: fMonth.value }) }));
   lb.append(filters);
