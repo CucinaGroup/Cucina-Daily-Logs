@@ -826,10 +826,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
-  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
-  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
-  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=urtwoalo&dl=0" },
+  { label: "Company 2 — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qylzd88a&dl=0" },
+  { label: "Company 3 — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=qa92owfw&dl=0" },
+  { label: "Company 4 — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=qy2zk22r&dl=0" }
 ];
 
 async function renderLeave(view) {
