@@ -33,8 +33,8 @@ const TIME_OPTIONS = (() => {
 })();
 const MEP_TIMES = [
   { value: "10:00", label: "10:00 AM" },
-  { value: "17:00", label: "5:00 PM" },
-  { value: "21:00", label: "9:00 PM" }
+  { value: "13:00", label: "1:00 PM" },
+  { value: "17:00", label: "5:00 PM" }
 ];
 // One shared, alphabetical item list for ALL process logs.
 const PROCESS_ITEMS = Array.from(new Set([
@@ -115,7 +115,7 @@ const LOGS = {
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
-      { key: "item_description", label: "Item description", type: "text" },
+      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS },
       { key: "loss_reason", label: "Loss reason", ...SEL("Closing","Leftover","Spoiled") },
       { key: "quantity", label: "Quantity", type: "number" },
       { key: "unit", label: "Unit", ...SEL("kg","L","ea") },
