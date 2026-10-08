@@ -281,8 +281,13 @@ function renderLog(id, view) {
       input.disabled = true;
     } else if (f.type === "employee") {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
-      const list = IS_ADMIN ? EMPLOYEES : EMPLOYEES.filter(x => MY_SITE && x.site_id === MY_SITE.id);
-      list.forEach(x => input.append(el("option", { value: x.name, textContent: x.name })));
+      let list = EMPLOYEES;
+      if (!IS_ADMIN) {
+        const sid = (MY_SITE && MY_SITE.id) || MGR_SITE;
+        const filtered = EMPLOYEES.filter(x => Number(x.site_id) === Number(sid));
+        list = filtered.length ? filtered : EMPLOYEES;   // fall back so it is never empty
+      }
+      Array.from(new Set(list.map(x => x.name))).sort((p, q) => p.localeCompare(q)).forEach(n => input.append(el("option", { value: n, textContent: n })));
     } else if (f.type === "site") {
       input = el("select");
       if (MULTI || IS_ADMIN) input.append(el("option", { value: "", textContent: "—" }));
@@ -1337,9 +1342,10 @@ async function renderCashManager(view) {
   const b = el("div", { className: "body" });
   const grid = el("div", { className: "formgrid" });
   const dateI = el("input", { type: "date" }); dateI.value = new Date().toLocaleDateString("en-CA"); dateI.disabled = true;
-  const closedBy = empSelect();
+  const recordedBy = empSelect();
+  const tillBy = empSelect();
   const cashI = el("input", { type: "number", step: "0.01" });
-  grid.append(fieldWrap("Date", dateI), fieldWrap("Closed by", closedBy), fieldWrap("Cash Sales (On Hand)", cashI));
+  grid.append(fieldWrap("Date", dateI), fieldWrap("Recorded by", recordedBy), fieldWrap("Till Closed By", tillBy), fieldWrap("Cash Sales (On Hand) ($)", cashI));
   b.append(grid);
   const msg = el("span", { className: "msg" });
   const save = el("button", { className: "btn", textContent: "Save entry" });
@@ -1349,7 +1355,7 @@ async function renderCashManager(view) {
   save.onclick = async () => {
     if (cashI.value === "") { msg.textContent = "Enter the cash on hand."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.rpc("cash_manager_insert", { p_date: dateI.value, p_closed_by: closedBy.value || null, p_cash: Number(cashI.value) });
+    const { error } = await sb.rpc("cash_manager_insert", { p_date: dateI.value, p_recorded_by: recordedBy.value || null, p_till: tillBy.value || null, p_cash: Number(cashI.value) });
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
     msg.textContent = "Saved ✓"; msg.className = "msg ok"; cashI.value = "";
@@ -1371,7 +1377,7 @@ async function loadCashManager(card) {
   const rows = data || [];
   if (!rows.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
   const table = el("table");
-  table.append(el("thead", {}, el("tr", {}, ["Date","Closed by","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Save"].map(h => el("th", { textContent: h })))));
+  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Save"].map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
     const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:110px" });
@@ -1379,6 +1385,7 @@ async function loadCashManager(card) {
     tb.append(el("tr", {}, [
       el("td", { textContent: r.entry_date || "" }),
       el("td", { textContent: r.closed_by || "" }),
+      el("td", { textContent: r.till_closed_by || "" }),
       el("td", {}, inp),
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
       el("td", { textContent: money(cashDiffCash(r)) }),
@@ -1397,17 +1404,18 @@ async function loadCashManager(card) {
 /* ---------- Admin view: all columns ---------- */
 const CASH_FIELDS = [
   { k: "entry_date", label: "Date", type: "date" },
-  { k: "closed_by", label: "Closed by", type: "employee" },
+  { k: "closed_by", label: "Recorded by", type: "employee" },
+  { k: "till_closed_by", label: "Till Closed By", type: "employee" },
   { k: "remarks", label: "Remarks", type: "text" },
-  { k: "cash_on_hand", label: "Cash Sales (On Hand)", type: "number" },
-  { k: "actual_cash_lightspeed", label: "Actual Cash (Lightspeed)", type: "number" },
-  { k: "manual_tyro", label: "Manual Tyro", type: "number" },
+  { k: "cash_on_hand", label: "Cash Sales (On Hand) ($)", type: "number" },
+  { k: "actual_cash_lightspeed", label: "Actual Cash (Lightspeed) ($)", type: "number" },
+  { k: "manual_tyro", label: "Manual Tyro ($)", type: "number" },
   { k: "manual_tyro_reason", label: "Manual Tyro reason", type: "text" },
-  { k: "tab_square", label: "Tab Square (if available)", type: "number" },
-  { k: "bank_transfer", label: "Bank Transfer", type: "number" },
-  { k: "expenses", label: "Expenses", type: "number" },
+  { k: "tab_square", label: "Tab Square (if available) ($)", type: "number" },
+  { k: "bank_transfer", label: "Bank Transfer ($)", type: "number" },
+  { k: "expenses", label: "Expenses ($)", type: "number" },
   { k: "item", label: "Item", type: "text" },
-  { k: "amount", label: "Amount", type: "number" }
+  { k: "amount", label: "Amount ($)", type: "number" }
 ];
 
 async function renderCashAdmin(view) {
@@ -1495,7 +1503,7 @@ async function loadCashAdmin(card, flt = {}) {
   if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
   CASH_ROWS = data || [];
   if (!CASH_ROWS.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
-  const cols = ["Date","Site","Closed by","Remarks","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Manual Tyro","Manual Tyro reason","Tab Square","Bank Transfer","Expenses","Item","Amount","Action"];
+  const cols = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)","Action"];
   const table = el("table");
   table.append(el("thead", {}, el("tr", {}, cols.map(c => el("th", { textContent: c })))));
   const tb = el("tbody");
@@ -1504,6 +1512,7 @@ async function loadCashAdmin(card, flt = {}) {
       el("td", { textContent: r.entry_date || "" }),
       el("td", { textContent: allSiteName(r.site_id) }),
       el("td", { textContent: r.closed_by || "" }),
+      el("td", { textContent: r.till_closed_by || "" }),
       el("td", { textContent: r.remarks || "" }),
       el("td", { textContent: money(r.cash_on_hand) }),
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
@@ -1531,9 +1540,9 @@ async function loadCashAdmin(card, flt = {}) {
 
 function cashCSV() {
   if (!CASH_ROWS.length) return;
-  const head = ["Date","Site","Closed by","Remarks","Cash (On Hand)","Actual (Lightspeed)","Difference cash","Difference (Lightspeed)","Manual Tyro","Manual Tyro reason","Tab Square","Bank Transfer","Expenses","Item","Amount"];
+  const head = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)"];
   const rows = CASH_ROWS.map(r => [
-    r.entry_date || "", allSiteName(r.site_id), r.closed_by || "", r.remarks || "",
+    r.entry_date || "", allSiteName(r.site_id), r.closed_by || "", r.till_closed_by || "", r.remarks || "",
     r.cash_on_hand ?? "", r.actual_cash_lightspeed ?? "", cashDiffCash(r) ?? "", cashDiffLS(r) ?? "",
     r.manual_tyro ?? "", r.manual_tyro_reason || "", r.tab_square ?? "", r.bank_transfer ?? "", r.expenses ?? "", r.item || "", r.amount ?? ""
   ]);
