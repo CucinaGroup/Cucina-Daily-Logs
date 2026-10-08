@@ -777,8 +777,10 @@ async function renderLeave(view) {
 
   // intro
   const intro = el("div", { style: "background:var(--input-bg);border:1px solid #e4dfc4;border-radius:10px;padding:16px 20px;margin-bottom:14px" });
-  intro.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal is where you apply for leave. Download your company's leave form below, fill it in and sign it, then submit the request here and upload the signed form." }));
-  intro.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Head office will review your request. You can see the status — Pending, Approved or Declined — and the reason for the decision, right here in this tab." }));
+  intro.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal is used to submit and manage employee leave applications. Team members are required to download the company's Leave Form below, complete all required information, sign the form, and submit their leave request through this portal together with the completed form." }));
+  intro.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "For Sick Leave or Carer's Leave, team members are also required to upload the relevant medical certificate or supporting documentation, where applicable, together with their leave application." }));
+  intro.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "All leave applications will be reviewed by the relevant Manager and Head Office. Once submitted, team members can view the status of their application, including whether it is Pending, Approved, or Declined, along with any applicable comments or reasons provided as part of the decision." }));
+  intro.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "All submitted leave applications are treated as confidential and can only be accessed by authorised Managers and Head Office personnel." }));
   b.append(intro);
 
   // template downloads
