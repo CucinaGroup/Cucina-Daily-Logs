@@ -161,20 +161,17 @@ async function boot() {
   }
   MY_SITE = SITES[0] || null;
   MULTI = SITES.length > 1;
-  const MANAGER_ONLY = IS_MANAGER && !IS_ADMIN;
-  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : MANAGER_ONLY ? "Leave manager" : (MY_SITE ? "Site: " + MY_SITE.name : "") });
+  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : (IS_MANAGER ? (MY_SITE ? "Site: " + MY_SITE.name + " (manager)" : "Manager") : (MY_SITE ? "Site: " + MY_SITE.name : "")) });
   tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
   $("#who").prepend(tag);
 
-  let navDefs;
-  if (MANAGER_ONLY) {
-    navDefs = [{ id: "leave", label: "Leave" }];
-  } else {
-    navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
-    navDefs.push({ id: "order", label: "Order" });
-    if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
-    navDefs.push({ id: "leave", label: "Leave" });
-  }
+  // Managers see the same tabs as a normal employee (plus leave-management
+  // powers inside the Leave tab); only admins get the admin-only Catalogue tab.
+  const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
+  navDefs.push({ id: "order", label: "Order" });
+  if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
+  navDefs.push({ id: "leave", label: "Leave" });
+  navDefs.push({ id: "pestcon", label: "Pest Control" });
   if (!navDefs.some(d => d.id === CURRENT)) CURRENT = navDefs[0].id;
 
   nav.innerHTML = "";
@@ -203,6 +200,7 @@ function openTab(id) {
   if (id === "order") return renderOrder(view);
   if (id === "catalogue") return renderCatalogue(view);
   if (id === "leave") return renderLeave(view);
+  if (id === "pestcon") return renderPestcon(view);
   return renderLog(id, view);
 }
 
@@ -768,9 +766,7 @@ const LEAVE_TEMPLATES = [
 async function renderLeave(view) {
   view.innerHTML = "";
   try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
-  const managerOnly = IS_MANAGER && !IS_ADMIN;
-
-  if (!managerOnly) {
+  {
   const card = el("div", { className: "card" });
   card.append(el("h2", { textContent: "Apply for leave" }));
   const b = el("div", { className: "body" });
@@ -811,14 +807,14 @@ async function renderLeave(view) {
   const fromI = el("input", { type: "date" });
   const toI = el("input", { type: "date" });
   const reasonI = el("textarea");
-  const formI = el("input", { type: "file", accept: "application/pdf,image/*" });
+  const formI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
   grid.append(
     fieldWrap("Your name", nameI),
     fieldWrap("Leave type", typeI),
     fieldWrap("From", fromI),
     fieldWrap("To", toI),
     fieldWrap("Reason / notes", reasonI),
-    fieldWrap("Signed leave form (PDF or photo)", formI)
+    fieldWrap("Attachments — signed leave form + medical certificate / supporting docs (you can select more than one)", formI)
   );
   b.append(grid);
   const msg = el("span", { className: "msg" });
@@ -831,17 +827,19 @@ async function renderLeave(view) {
     if (!nameI.value.trim() || !fromI.value || !toI.value) { msg.textContent = "Name, From and To dates are required."; msg.className = "msg err"; return; }
     if (toI.value < fromI.value) { msg.textContent = "The 'To' date can't be before the 'From' date."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Submitting…"; msg.className = "msg";
-    let form_path = null;
-    const file = formI.files[0];
-    if (file) {
-      const path = orderSite + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "");
-      const { error: upErr } = await sb.storage.from("leave-forms").upload(path, file);
-      if (upErr) { save.disabled = false; msg.textContent = "Form upload: " + upErr.message; msg.className = "msg err"; return; }
-      form_path = path;
+    const attachments = [];
+    const files = Array.from(formI.files || []);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const path = orderSite + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+      const { error: upErr } = await sb.storage.from("leave-forms").upload(path, f);
+      if (upErr) { save.disabled = false; msg.textContent = "Attachment upload: " + upErr.message; msg.className = "msg err"; return; }
+      attachments.push({ path, name: f.name });
     }
     const { error } = await sb.from("leave_requests").insert([{
       site_id: orderSite, staff_name: nameI.value.trim(), leave_type: typeI.value,
-      date_from: fromI.value, date_to: toI.value, reason: reasonI.value || null, form_path
+      date_from: fromI.value, date_to: toI.value, reason: reasonI.value || null,
+      form_path: attachments.length ? attachments[0].path : null, attachments
     }]);
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
@@ -854,7 +852,7 @@ async function renderLeave(view) {
     b.append(el("div", { className: "sub", style: "margin-top:12px", textContent: "Your request goes to your manager and head office for review. Submitted leave is private — only managers and head office can see it." }));
     return;
   }
-  } // end !managerOnly submit card
+  } // end submit card
 
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Leave requests" }));
@@ -879,6 +877,15 @@ async function viewLeaveForm(path) {
   const { data, error } = await sb.storage.from("leave-forms").createSignedUrl(path, 120);
   if (error || !data) { alert("Couldn't open the form: " + (error ? error.message : "unknown error")); return; }
   window.open(data.signedUrl, "_blank");
+}
+
+function leaveFilesCell(r) {
+  let files = Array.isArray(r.attachments) ? r.attachments.slice() : [];
+  if (!files.length && r.form_path) files = [{ path: r.form_path, name: "Attachment" }];
+  if (!files.length) return el("span", { textContent: "—" });
+  const box = el("div", { style: "display:flex;flex-direction:column;gap:3px" });
+  files.forEach((f, i) => box.append(el("button", { className: "btn ghost small", textContent: "Download " + (f.name || ("file " + (i+1))), onclick: () => viewLeaveForm(f.path) })));
+  return box;
 }
 
 let LEAVE_ROWS = [];
@@ -907,7 +914,7 @@ async function loadLeaveList(card, flt = {}) {
       el("td", { textContent: r.leave_type || "" }),
       el("td", { textContent: r.date_from || "" }),
       el("td", { textContent: r.date_to || "" }),
-      el("td", {}, r.form_path ? el("button", { className: "btn ghost small", textContent: "Download", onclick: () => viewLeaveForm(r.form_path) }) : el("span", { textContent: "—" })),
+      el("td", {}, leaveFilesCell(r)),
       el("td", {}, el("span", { className: "badge " + sc, textContent: r.status || "Pending" })),
       el("td", { textContent: r.admin_note || "" })
     );
@@ -941,12 +948,114 @@ async function loadLeaveList(card, flt = {}) {
 
 function leaveCSV() {
   if (!LEAVE_ROWS.length) return;
-  const head = ["Submitted","Name","Site","Type","From","To","Status","Reason for decision","Signed form"];
+  const head = ["Submitted","Name","Site","Type","From","To","Status","Reason for decision","Attachments"];
   const rows = LEAVE_ROWS.map(r => [
     r.created_at ? new Date(r.created_at).toLocaleString() : "", r.staff_name || "", allSiteName(r.site_id),
-    r.leave_type || "", r.date_from || "", r.date_to || "", r.status || "Pending", r.admin_note || "", r.form_path ? "yes" : "no"
+    r.leave_type || "", r.date_from || "", r.date_to || "", r.status || "Pending", r.admin_note || "",
+    (Array.isArray(r.attachments) ? r.attachments.length : (r.form_path ? 1 : 0))
   ]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "leave_" + new Date().toISOString().slice(0,10) + ".csv" });
   document.body.append(a); a.click(); a.remove();
+}
+
+/* ===================== PEST CONTROL ===================== */
+async function renderPestcon(view) {
+  view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+
+  const intro = el("div", { className: "card" });
+  const ib = el("div", { className: "body" });
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Monthly pest-control records for each site. Choose a site to view and download its reports. Head office uploads the reports here each month as proof of regular pest control." }));
+  intro.append(ib); view.append(intro);
+
+  // admin upload
+  if (IS_ADMIN) {
+    const card = el("div", { className: "card" });
+    card.append(el("h2", { textContent: "Upload pest-control report" }));
+    const b = el("div", { className: "body" });
+    const grid = el("div", { className: "formgrid" });
+    const siteSel = el("select");
+    siteSel.append(el("option", { value: "", textContent: "— site —" }));
+    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    const monthI = el("input", { type: "month" }); monthI.value = new Date().toISOString().slice(0,7);
+    const titleI = el("input", { type: "text" });
+    const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
+    grid.append(fieldWrap("Site", siteSel), fieldWrap("Month", monthI), fieldWrap("Title / provider", titleI), fieldWrap("File(s)", fileI));
+    b.append(grid);
+    const msg = el("span", { className: "msg" });
+    const save = el("button", { className: "btn", textContent: "Upload" });
+    b.append(el("div", { className: "actions" }, [save, msg]));
+    card.append(b); view.append(card);
+
+    save.onclick = async () => {
+      const site_id = Number(siteSel.value);
+      const files = Array.from(fileI.files || []);
+      if (!site_id || !files.length) { msg.textContent = "Choose a site and at least one file."; msg.className = "msg err"; return; }
+      save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+        const { error: upErr } = await sb.storage.from("pestcon").upload(path, f);
+        if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
+        const { error } = await sb.from("pestcon").insert([{ site_id, period_month: monthI.value + "-01", title: titleI.value || null, file_path: path }]);
+        if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
+      }
+      save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
+      titleI.value = ""; fileI.value = "";
+      loadPestconList(listCard, { site: siteSel.value });
+    };
+  }
+
+  // list / download
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Pest-control reports" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  const fMonth = el("input", { type: "month" });
+  filters.append(fieldWrap("Site", fSite), fieldWrap("Month", fMonth),
+    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadPestconList(listCard, { site: fSite.value, month: fMonth.value }) }));
+  lb.append(filters);
+  lb.append(el("div", { className: "tablewrap" }));
+  listCard.append(lb); view.append(listCard);
+  loadPestconList(listCard);
+}
+
+async function loadPestconList(card, flt = {}) {
+  const tw = card.querySelector(".tablewrap");
+  tw.innerHTML = "<div class='empty'>Loading…</div>";
+  let q = sb.from("pestcon").select("*").order("period_month", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  if (flt.site) q = q.eq("site_id", flt.site);
+  if (flt.month) q = q.eq("period_month", flt.month + "-01");
+  const { data, error } = await q;
+  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { tw.innerHTML = "<div class='empty'>No pest-control reports yet.</div>"; return; }
+  const table = el("table");
+  const head = ["Month","Site","Title / provider","Report"].concat(IS_ADMIN ? ["Action"] : []);
+  table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
+  const tb = el("tbody");
+  rows.forEach(r => {
+    const url = sb.storage.from("pestcon").getPublicUrl(r.file_path).data.publicUrl;
+    const cells = [
+      el("td", { textContent: r.period_month ? r.period_month.slice(0,7) : "" }),
+      el("td", { textContent: allSiteName(r.site_id) }),
+      el("td", { textContent: r.title || "" }),
+      el("td", {}, el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Download" }))
+    ];
+    if (IS_ADMIN) {
+      cells.push(el("td", {}, el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
+        if (!confirm("Delete this report?")) return;
+        await sb.storage.from("pestcon").remove([r.file_path]);
+        await sb.from("pestcon").delete().eq("id", r.id);
+        loadPestconList(card, flt);
+      }})));
+    }
+    tb.append(el("tr", {}, cells));
+  });
+  table.append(tb);
+  tw.innerHTML = ""; tw.append(table);
 }
