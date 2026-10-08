@@ -133,6 +133,7 @@ let MY_SITE = null;
 let MULTI = false;       // more than one site visible
 let IS_ADMIN = false;    // all-site admin login
 let IS_MANAGER = false;  // leave-only manager login
+let IS_FINANCE = false;  // finance: view all, no data entry, full cash, no complaints
 let MGR_SITE = null;     // a manager's own site (they can only decide/delete this one)
 let ALL_SITES = [];      // full site list for the leave picker (via all_sites RPC)
 let EMPLOYEES = [];      // name roster for the Recorded-by dropdowns
@@ -181,15 +182,16 @@ async function boot() {
   try { const { data } = await sb.rpc("is_admin"); IS_ADMIN = !!data; } catch (e) { IS_ADMIN = false; }
   try { const { data } = await sb.rpc("is_manager"); IS_MANAGER = !!data; } catch (e) { IS_MANAGER = false; }
   if (IS_MANAGER) { try { const { data } = await sb.rpc("manager_site_id"); MGR_SITE = data || null; } catch (e) { MGR_SITE = null; } }
+  try { const { data } = await sb.rpc("is_finance"); IS_FINANCE = !!data; } catch (e) { IS_FINANCE = false; }
   const nav = $("#tabs");
-  if (!SITES.length && !IS_ADMIN && !IS_MANAGER) {
+  if (!SITES.length && !IS_ADMIN && !IS_MANAGER && !IS_FINANCE) {
     nav.innerHTML = "";
     $("#view").innerHTML = "<div class='card'><div class='body'>This login isn't linked to a site yet. Ask your manager to assign it in Supabase (site_logins) before entering data.</div></div>";
     return;
   }
   MY_SITE = SITES[0] || null;
   MULTI = SITES.length > 1;
-  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : (IS_MANAGER ? (MY_SITE ? "Site: " + MY_SITE.name + " (manager)" : "Manager") : (MY_SITE ? "Site: " + MY_SITE.name : "")) });
+  const tag = el("span", { textContent: IS_ADMIN ? "All sites (admin)" : IS_FINANCE ? "Finance (view + cash)" : (IS_MANAGER ? (MY_SITE ? "Site: " + MY_SITE.name + " (manager)" : "Manager") : (MY_SITE ? "Site: " + MY_SITE.name : "")) });
   tag.style.fontWeight = "bold"; tag.style.color = "var(--bar-text)";
   $("#who").prepend(tag);
 
@@ -210,12 +212,12 @@ async function boot() {
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" }
     ]},
-    { header: null, items: [{ id: "complaints", label: "Complaints / Suggestions Box" }] },
-    { header: "Manager Portal", show: mgr, items: [
+    { header: null, show: !IS_FINANCE, items: [{ id: "complaints", label: "Complaints / Suggestions Box" }] },
+    { header: "Manager Portal", show: mgr || IS_FINANCE, items: [
       { id: "cash", label: "Daily Cash Sales Log" },
       { id: "order", label: "Site Order" }
     ]},
-    { header: "Admin", show: IS_ADMIN, items: [
+    { header: "Admin", show: IS_ADMIN || IS_FINANCE, items: [
       { id: "catalogue", label: "Catalogue" }
     ]}
   ];
@@ -305,7 +307,7 @@ function renderLog(id, view) {
   const msg = el("span", { className: "msg" });
   const saveBtn = el("button", { className: "btn", textContent: "Save entry" });
   body.append(el("div", { className: "actions" }, [saveBtn, msg]));
-  form.append(body); view.append(form);
+  form.append(body); if (!IS_FINANCE) view.append(form);
 
   saveBtn.onclick = async () => {
     const row = { ...(def.fixed || {}) };
@@ -431,6 +433,14 @@ async function loadCategories() {
 }
 async function renderCatalogue(view) {
   view.innerHTML = "";
+  if (IS_FINANCE) {
+    const only = el("div", { className: "card" });
+    only.append(el("h2", { textContent: "Catalogue" }));
+    only.append(el("div", { className: "body" }));
+    view.append(only);
+    renderCatalogueList(only);
+    return;
+  }
   const cats = await loadCategories();
 
   // ---- add item ----
@@ -539,7 +549,7 @@ function itemCard(i, cats, card) {
   if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
   if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
   ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
-  ci.append(el("div", { className: "actions" }, [
+  if (!IS_FINANCE) ci.append(el("div", { className: "actions" }, [
     el("button", { className: "btn ghost small", textContent: "Edit", onclick: () => ci.replaceWith(itemEditCard(i, cats, card)) }),
     el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
       if (!confirm("Delete " + i.name + "?")) return;
@@ -619,6 +629,7 @@ async function renderCatalogueList(card) {
 /* ===================== ORDER (site + admin) ===================== */
 async function renderOrder(view) {
   view.innerHTML = "";
+  if (IS_FINANCE) { renderOrderHistory(view); return; }  // finance: view-only
   const card = el("div", { className: "card" });
   card.append(el("h2", { textContent: "New order" }));
   const b = el("div", { className: "body" });
@@ -703,7 +714,7 @@ async function renderOrderHistory(view) {
   const b = el("div", { className: "body" });
   const filters = el("div", { className: "filters" });
   let siteSel = null;
-  if (IS_ADMIN) {
+  if (IS_ADMIN || IS_FINANCE) {
     siteSel = el("select");
     siteSel.append(el("option", { value: "", textContent: "All sites" }));
     SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
@@ -835,7 +846,7 @@ const LEAVE_TEMPLATES = [
 async function renderLeave(view) {
   view.innerHTML = "";
   try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
-  {
+  if (!IS_FINANCE) {
   const card = el("div", { className: "card" });
   card.append(el("h2", { textContent: "Apply for leave" }));
   const b = el("div", { className: "body" });
@@ -1155,6 +1166,14 @@ async function renderEmployees(view) {
   view.innerHTML = "";
   try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
 
+  if (IS_FINANCE) {
+    const only = el("div", { className: "card" });
+    only.append(el("h2", { textContent: "Team" }));
+    only.append(el("div", { className: "body" }));
+    view.append(only);
+    loadEmployeeList(only);
+    return;
+  }
   const card = el("div", { className: "card" });
   card.append(el("h2", { textContent: "Add your name" }));
   const b = el("div", { className: "body" });
@@ -1332,9 +1351,7 @@ const CASH_NUM = new Set(["cash_on_hand","actual_cash_lightspeed","manual_tyro",
 
 async function renderCashSales(view) {
   view.innerHTML = "";
-  const isAdmin = IS_ADMIN;
-
-  if (isAdmin) return renderCashAdmin(view);
+  if (IS_ADMIN || IS_FINANCE) return renderCashAdmin(view);
   return renderCashManager(view);
 }
 
