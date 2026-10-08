@@ -160,8 +160,7 @@ async function boot() {
   const navDefs = Object.entries(LOGS).filter(([id]) => id !== "sites").map(([id, def]) => ({ id, label: def.label }));
   navDefs.push({ id: "order", label: "Order" });
   if (IS_ADMIN) navDefs.push({ id: "catalogue", label: "Catalogue" });
-  navDefs.push({ id: "refresher", label: "Refresher" });
-  if (IS_ADMIN) navDefs.push({ id: "questions", label: "Questions" });
+  navDefs.push({ id: "leave", label: "Leave" });
 
   nav.innerHTML = "";
   navDefs.forEach(d => {
@@ -188,8 +187,7 @@ function openTab(id) {
   const view = $("#view"); view.innerHTML = "";
   if (id === "order") return renderOrder(view);
   if (id === "catalogue") return renderCatalogue(view);
-  if (id === "refresher") return renderRefresher(view);
-  if (id === "questions") return renderQuestions(view);
+  if (id === "leave") return renderLeave(view);
   return renderLog(id, view);
 }
 
@@ -740,104 +738,15 @@ async function renderOrderHistory(view) {
 }
 
 
-/* ===================== REFRESHER QUIZ ===================== */
-const PASS_PCT = 80;   // pass mark
 
-async function loadQuestions(activeOnly) {
-  let q = sb.from("refresher_questions").select("*").order("id");
-  if (activeOnly) q = q.eq("active", true);
-  const { data } = await q;
-  return data || [];
-}
-
-/* ---- Questions bank (admin) ---- */
-async function renderQuestions(view) {
+/* ===================== LEAVE REQUESTS ===================== */
+async function renderLeave(view) {
   view.innerHTML = "";
   const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "Add refresher question" }));
+  card.append(el("h2", { textContent: "Submit a leave request" }));
   const b = el("div", { className: "body" });
+
   const grid = el("div", { className: "formgrid" });
-  const qI = el("textarea");
-  const aI = el("input", { type: "text" });
-  const bI = el("input", { type: "text" });
-  const cI = el("input", { type: "text" });
-  const dI = el("input", { type: "text" });
-  const correct = el("select");
-  ["A","B","C","D"].forEach(o => correct.append(el("option", { value: o, textContent: o })));
-  grid.append(
-    fieldWrap("Question", qI),
-    fieldWrap("Option A", aI),
-    fieldWrap("Option B", bI),
-    fieldWrap("Option C", cI),
-    fieldWrap("Option D", dI),
-    fieldWrap("Correct answer", correct)
-  );
-  b.append(grid);
-  const msg = el("span", { className: "msg" });
-  const save = el("button", { className: "btn", textContent: "Add question" });
-  b.append(el("div", { className: "actions" }, [save, msg]));
-  card.append(b); view.append(card);
-
-  const listCard = el("div", { className: "card" });
-  listCard.append(el("h2", { textContent: "Question bank" }));
-  listCard.append(el("div", { className: "body" }));
-  view.append(listCard);
-  loadQuestionList(listCard);
-
-  save.onclick = async () => {
-    const question = qI.value.trim();
-    if (!question || !aI.value.trim() || !bI.value.trim()) { msg.textContent = "Question and at least options A and B are required."; msg.className = "msg err"; return; }
-    save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.from("refresher_questions").insert([{
-      question, option_a: aI.value || null, option_b: bI.value || null,
-      option_c: cI.value || null, option_d: dI.value || null, correct: correct.value
-    }]);
-    save.disabled = false;
-    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
-    msg.textContent = "Added ✓"; msg.className = "msg ok";
-    qI.value = ""; aI.value = ""; bI.value = ""; cI.value = ""; dI.value = "";
-    loadQuestionList(listCard);
-  };
-}
-
-async function loadQuestionList(card) {
-  const body = card.querySelector(".body");
-  body.innerHTML = "<div class='empty'>Loading…</div>";
-  const qs = await loadQuestions(false);
-  if (!qs.length) { body.innerHTML = "<div class='empty'>No questions yet — add some above.</div>"; return; }
-  body.innerHTML = "";
-  qs.forEach((q, i) => {
-    const row = el("div", { className: "card", style: "margin-bottom:10px" });
-    const rb = el("div", { className: "body" });
-    rb.append(el("p", { style: "font-weight:bold;margin:0 0 6px", textContent: (i+1) + ". " + q.question + (q.active ? "" : "  (inactive)") }));
-    ["a","b","c","d"].forEach(L => {
-      const txt = q["option_" + L];
-      if (txt) {
-        const isC = q.correct === L.toUpperCase();
-        rb.append(el("p", { style: "margin:2px 0;font-size:13px;color:" + (isC ? "#1f9d55" : "#555"), textContent: L.toUpperCase() + ". " + txt + (isC ? "  ✓ correct" : "") }));
-      }
-    });
-    rb.append(el("div", { className: "actions" }, [
-      el("button", { className: "btn ghost small", textContent: q.active ? "Deactivate" : "Reactivate", onclick: async () => {
-        await sb.from("refresher_questions").update({ active: !q.active }).eq("id", q.id); loadQuestionList(card);
-      }}),
-      el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
-        if (!confirm("Delete this question?")) return;
-        await sb.from("refresher_questions").delete().eq("id", q.id); loadQuestionList(card);
-      }})
-    ]));
-    row.append(rb); body.append(row);
-  });
-}
-
-/* ---- Take the refresher (everyone) ---- */
-async function renderRefresher(view) {
-  view.innerHTML = "";
-  const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "Monthly refresher assessment" }));
-  const b = el("div", { className: "body" });
-
-  const top = el("div", { className: "formgrid" });
   let orderSite = (!IS_ADMIN && MY_SITE) ? MY_SITE.id : null;
   let siteSel = null;
   if (IS_ADMIN) {
@@ -845,122 +754,116 @@ async function renderRefresher(view) {
     siteSel.append(el("option", { value: "", textContent: "— site —" }));
     SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
     siteSel.onchange = () => { orderSite = siteSel.value ? Number(siteSel.value) : null; };
-    top.append(fieldWrap("Site", siteSel));
+    grid.append(fieldWrap("Site", siteSel));
   }
   const nameI = el("input", { type: "text" });
-  const monthI = el("input", { type: "month" }); monthI.value = new Date().toISOString().slice(0,7);
-  top.append(fieldWrap("Your name", nameI), fieldWrap("Month", monthI));
-  b.append(top);
-  b.append(el("div", { className: "sub", textContent: "Answer every question, then submit. Pass mark is " + PASS_PCT + "%." }));
-
-  const qWrap = el("div"); b.append(qWrap);
-  const answers = {};
-  const qs = await loadQuestions(true);
-  if (!qs.length) {
-    qWrap.innerHTML = "<div class='empty'>No questions have been set up yet. Ask head office to add them in the Questions tab.</div>";
-  } else {
-    qs.forEach((q, i) => {
-      const block = el("div", { style: "padding:12px 0;border-bottom:1px solid #eee" });
-      block.append(el("p", { style: "font-weight:bold;margin:0 0 8px", textContent: (i+1) + ". " + q.question }));
-      ["a","b","c","d"].forEach(L => {
-        const txt = q["option_" + L];
-        if (!txt) return;
-        const opt = el("label", { style: "display:flex;gap:10px;align-items:center;padding:5px 0;font-size:14px;cursor:pointer" });
-        const radio = el("input", { type: "radio", name: "q" + q.id, value: L.toUpperCase() });
-        radio.onchange = () => { answers[q.id] = L.toUpperCase(); };
-        opt.append(radio, el("span", { textContent: L.toUpperCase() + ". " + txt }));
-        block.append(opt);
-      });
-      qWrap.append(block);
-    });
-  }
-
-  const resultBar = el("div", { className: "order-total" });
-  const resultTxt = el("span", { textContent: "Not submitted" });
-  const submit = el("button", { className: "btn", textContent: "Submit answers" });
+  const typeI = el("select");
+  ["Annual leave","Personal / carer's leave","Sick leave","Unpaid leave","Other"].forEach(o => typeI.append(el("option", { value: o, textContent: o })));
+  const fromI = el("input", { type: "date" });
+  const toI = el("input", { type: "date" });
+  const reasonI = el("textarea");
+  grid.append(
+    fieldWrap("Your name", nameI),
+    fieldWrap("Leave type", typeI),
+    fieldWrap("From", fromI),
+    fieldWrap("To", toI),
+    fieldWrap("Reason / notes", reasonI)
+  );
+  b.append(grid);
   const msg = el("span", { className: "msg" });
-  resultBar.append(resultTxt, el("div", { style: "flex:1" }), submit, msg);
-  if (qs.length) b.append(resultBar);
+  const save = el("button", { className: "btn", textContent: "Submit request" });
+  b.append(el("div", { className: "actions" }, [save, msg]));
   card.append(b); view.append(card);
 
-  submit.onclick = async () => {
+  save.onclick = async () => {
     if (!orderSite) { msg.textContent = "Choose a site first."; msg.className = "msg err"; return; }
-    if (!nameI.value.trim()) { msg.textContent = "Enter your name."; msg.className = "msg err"; return; }
-    if (Object.keys(answers).length < qs.length) { msg.textContent = "Please answer all questions."; msg.className = "msg err"; return; }
-    let correct = 0;
-    qs.forEach(q => { if (answers[q.id] === q.correct) correct++; });
-    const total = qs.length;
-    const pct = Math.round((correct / total) * 100);
-    const passed = pct >= PASS_PCT;
-    resultTxt.textContent = "Score: " + correct + " / " + total + "  (" + pct + "%) — " + (passed ? "PASS" : "FAIL");
-    resultBar.style.background = passed ? "#1f9d55" : "#e02424";
-    resultBar.style.color = "#fff";
-    submit.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.from("refresher_results").insert([{
-      site_id: orderSite, staff_name: nameI.value.trim(), period_month: monthI.value + "-01",
-      score: correct, total, percent: pct, passed
+    if (!nameI.value.trim() || !fromI.value || !toI.value) { msg.textContent = "Name, From and To dates are required."; msg.className = "msg err"; return; }
+    if (toI.value < fromI.value) { msg.textContent = "The 'To' date can't be before the 'From' date."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Submitting…"; msg.className = "msg";
+    const { error } = await sb.from("leave_requests").insert([{
+      site_id: orderSite, staff_name: nameI.value.trim(), leave_type: typeI.value,
+      date_from: fromI.value, date_to: toI.value, reason: reasonI.value || null
     }]);
-    if (error) { submit.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
-    msg.textContent = "Recorded ✓"; msg.className = "msg ok";
-    loadRefresherResults(histCard, { site: IS_ADMIN && siteSel ? siteSel.value : "" });
+    save.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Submitted ✓"; msg.className = "msg ok";
+    nameI.value = ""; fromI.value = ""; toI.value = ""; reasonI.value = "";
+    loadLeaveList(listCard);
   };
 
-  // results history
-  const histCard = el("div", { className: "card" });
-  histCard.append(el("h2", { textContent: "Results" }));
-  const hb = el("div", { className: "body" });
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Leave requests" }));
+  const lb = el("div", { className: "body" });
   const filters = el("div", { className: "filters" });
-  let fSite = null;
+  let fSite = null, fStatus = el("select");
+  ["", "Pending", "Approved", "Declined"].forEach(o => fStatus.append(el("option", { value: o, textContent: o || "All statuses" })));
   if (IS_ADMIN) {
     fSite = el("select");
     fSite.append(el("option", { value: "", textContent: "All sites" }));
     SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
     filters.append(fieldWrap("Site", fSite));
   }
-  const fMonth = el("input", { type: "month" });
-  filters.append(fieldWrap("Month", fMonth),
-    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadRefresherResults(histCard, { site: fSite ? fSite.value : "", month: fMonth.value }) }),
-    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => refresherCSV() }));
-  hb.append(filters);
-  hb.append(el("div", { className: "tablewrap" }));
-  histCard.append(hb); view.append(histCard);
-  loadRefresherResults(histCard);
+  filters.append(fieldWrap("Status", fStatus),
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadLeaveList(listCard, { site: fSite ? fSite.value : "", status: fStatus.value }) }),
+    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => leaveCSV() }));
+  lb.append(filters);
+  lb.append(el("div", { className: "tablewrap" }));
+  listCard.append(lb); view.append(listCard);
+  loadLeaveList(listCard);
 }
 
-let REFRESHER_ROWS = [];
-async function loadRefresherResults(card, flt = {}) {
+let LEAVE_ROWS = [];
+async function loadLeaveList(card, flt = {}) {
   const tw = card.querySelector(".tablewrap");
   tw.innerHTML = "<div class='empty'>Loading…</div>";
-  let q = sb.from("refresher_results").select("*").order("period_month", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  let q = sb.from("leave_requests").select("*").order("created_at", { ascending: false }).limit(500);
   if (flt.site) q = q.eq("site_id", flt.site);
-  if (flt.month) q = q.eq("period_month", flt.month + "-01");
+  if (flt.status) q = q.eq("status", flt.status);
   const { data, error } = await q;
   if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
-  REFRESHER_ROWS = data || [];
-  if (!REFRESHER_ROWS.length) { tw.innerHTML = "<div class='empty'>No results yet.</div>"; return; }
+  LEAVE_ROWS = data || [];
+  if (!LEAVE_ROWS.length) { tw.innerHTML = "<div class='empty'>No leave requests yet.</div>"; return; }
   const table = el("table");
-  const head = ["Month","Name"].concat(IS_ADMIN ? ["Site"] : []).concat(["Score","Result"]);
+  const head = ["Submitted","Name"].concat(IS_ADMIN ? ["Site"] : []).concat(["Type","From","To","Reason","Status"]).concat(IS_ADMIN ? ["Action"] : []);
   table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
-  REFRESHER_ROWS.forEach(r => {
-    const cells = [el("td", { textContent: r.period_month ? r.period_month.slice(0,7) : "" }), el("td", { textContent: r.staff_name || "" })];
+  LEAVE_ROWS.forEach(r => {
+    const sc = r.status === "Approved" ? "ok" : r.status === "Declined" ? "bad" : "pending";
+    const cells = [
+      el("td", { textContent: r.created_at ? new Date(r.created_at).toLocaleDateString() : "" }),
+      el("td", { textContent: r.staff_name || "" })
+    ];
     if (IS_ADMIN) cells.push(el("td", { textContent: siteName(r.site_id) }));
-    cells.push(el("td", { textContent: r.score + " / " + r.total + " (" + r.percent + "%)" }));
-    cells.push(el("td", {}, el("span", { className: "badge " + (r.passed ? "ok" : "bad"), textContent: r.passed ? "PASS" : "FAIL" })));
+    cells.push(
+      el("td", { textContent: r.leave_type || "" }),
+      el("td", { textContent: r.date_from || "" }),
+      el("td", { textContent: r.date_to || "" }),
+      el("td", { textContent: r.reason || "" }),
+      el("td", {}, el("span", { className: "badge " + sc, textContent: r.status || "Pending" }))
+    );
+    if (IS_ADMIN) {
+      const approve = el("button", { className: "btn ghost small", textContent: "Approve", onclick: async () => {
+        await sb.from("leave_requests").update({ status: "Approved" }).eq("id", r.id); loadLeaveList(card, flt);
+      }});
+      const decline = el("button", { className: "btn ghost small", textContent: "Decline", onclick: async () => {
+        await sb.from("leave_requests").update({ status: "Declined" }).eq("id", r.id); loadLeaveList(card, flt);
+      }});
+      cells.push(el("td", {}, el("div", { style: "display:flex;gap:6px" }, [approve, decline])));
+    }
     tb.append(el("tr", {}, cells));
   });
   table.append(tb);
   tw.innerHTML = ""; tw.append(table);
 }
 
-function refresherCSV() {
-  if (!REFRESHER_ROWS.length) return;
-  const head = ["Month","Name","Site","Score","Total","Percent","Result"];
-  const rows = REFRESHER_ROWS.map(r => [
-    r.period_month ? r.period_month.slice(0,7) : "", r.staff_name || "", siteName(r.site_id),
-    r.score, r.total, r.percent, r.passed ? "PASS" : "FAIL"
+function leaveCSV() {
+  if (!LEAVE_ROWS.length) return;
+  const head = ["Submitted","Name","Site","Type","From","To","Reason","Status"];
+  const rows = LEAVE_ROWS.map(r => [
+    r.created_at ? new Date(r.created_at).toLocaleString() : "", r.staff_name || "", siteName(r.site_id),
+    r.leave_type || "", r.date_from || "", r.date_to || "", r.reason || "", r.status || "Pending"
   ]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "refresher_" + new Date().toISOString().slice(0,10) + ".csv" });
+  const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "leave_" + new Date().toISOString().slice(0,10) + ".csv" });
   document.body.append(a); a.click(); a.remove();
 }
