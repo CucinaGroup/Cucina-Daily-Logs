@@ -826,10 +826,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
-  { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
-  { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
-  { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+  { label: "Company 2 — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
+  { label: "Company 3 — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
+  { label: "Company 4 — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
 ];
 
 async function renderLeave(view) {
@@ -1319,6 +1319,8 @@ async function loadMSDSList(card, flt = {}) {
 const money = v => (v === null || v === undefined || v === "") ? "" : "$" + Number(v).toFixed(2);
 function cashDiffCash(r) { return (r.cash_on_hand != null && r.actual_cash_lightspeed != null) ? Number(r.cash_on_hand) - Number(r.actual_cash_lightspeed) : null; }
 function cashDiffLS(r) { return (r.actual_cash_lightspeed != null) ? Number(r.actual_cash_lightspeed) - ((Number(r.manual_tyro) || 0) + (Number(r.tab_square) || 0) + (Number(r.bank_transfer) || 0)) : null; }
+function cashStatus(r) { const d = cashDiffCash(r); if (d == null) return null; if (Math.abs(d) < 0.005) return "Balanced"; return d > 0 ? "Over" : "Short"; }
+function cashStatusBadge(r) { const s = cashStatus(r); if (!s) return el("span", { textContent: "" }); const cls = s === "Balanced" ? "ok" : s === "Short" ? "bad" : "pending"; return el("span", { className: "badge " + cls, textContent: s }); }
 function empSelect(initial) {
   const sel = el("select");
   sel.append(el("option", { value: "", textContent: "— name —" }));
@@ -1380,7 +1382,7 @@ async function loadCashManager(card) {
   const rows = data || [];
   if (!rows.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
   const table = el("table");
-  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Save"].map(h => el("th", { textContent: h })))));
+  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Save"].map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
     const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:110px" });
@@ -1393,6 +1395,7 @@ async function loadCashManager(card) {
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
       el("td", { textContent: money(cashDiffCash(r)) }),
       el("td", { textContent: money(cashDiffLS(r)) }),
+      el("td", {}, cashStatusBadge(r)),
       el("td", {}, el("button", { className: "btn ghost small", textContent: "Save", onclick: async () => {
         const { error } = await sb.rpc("cash_manager_set_onhand", { p_id: r.id, p_cash: inp.value === "" ? null : Number(inp.value) });
         m.textContent = error ? "!" : "✓"; m.className = "msg " + (error ? "err" : "ok");
@@ -1516,7 +1519,7 @@ async function loadCashAdmin(card, flt = {}) {
   if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
   CASH_ROWS = data || [];
   if (!CASH_ROWS.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
-  const cols = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)","Action"];
+  const cols = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)","Action"];
   const table = el("table");
   table.append(el("thead", {}, el("tr", {}, cols.map(c => el("th", { textContent: c })))));
   const tb = el("tbody");
@@ -1531,6 +1534,7 @@ async function loadCashAdmin(card, flt = {}) {
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
       el("td", { textContent: money(cashDiffCash(r)) }),
       el("td", { textContent: money(cashDiffLS(r)) }),
+      el("td", {}, cashStatusBadge(r)),
       el("td", { textContent: money(r.manual_tyro) }),
       el("td", { textContent: r.manual_tyro_reason || "" }),
       el("td", { textContent: money(r.tab_square) }),
@@ -1553,10 +1557,10 @@ async function loadCashAdmin(card, flt = {}) {
 
 function cashCSV() {
   if (!CASH_ROWS.length) return;
-  const head = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)"];
+  const head = ["Date","Site","Recorded by","Till Closed By","Remarks","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Manual Tyro ($)","Manual Tyro reason","Tab Square ($)","Bank Transfer ($)","Expenses ($)","Item","Amount ($)"];
   const rows = CASH_ROWS.map(r => [
     r.entry_date || "", allSiteName(r.site_id), r.closed_by || "", r.till_closed_by || "", r.remarks || "",
-    r.cash_on_hand ?? "", r.actual_cash_lightspeed ?? "", cashDiffCash(r) ?? "", cashDiffLS(r) ?? "",
+    r.cash_on_hand ?? "", r.actual_cash_lightspeed ?? "", cashDiffCash(r) ?? "", cashDiffLS(r) ?? "", cashStatus(r) ?? "",
     r.manual_tyro ?? "", r.manual_tyro_reason || "", r.tab_square ?? "", r.bank_transfer ?? "", r.expenses ?? "", r.item || "", r.amount ?? ""
   ]);
   // monthly TOTAL row across the money columns
@@ -1564,7 +1568,7 @@ function cashCSV() {
   const sumFn = fn => CASH_ROWS.reduce((a, r) => a + (Number(fn(r)) || 0), 0);
   rows.push(["TOTAL","","","","",
     sum("cash_on_hand").toFixed(2), sum("actual_cash_lightspeed").toFixed(2),
-    sumFn(cashDiffCash).toFixed(2), sumFn(cashDiffLS).toFixed(2),
+    sumFn(cashDiffCash).toFixed(2), sumFn(cashDiffLS).toFixed(2), "",
     sum("manual_tyro").toFixed(2), "", sum("tab_square").toFixed(2), sum("bank_transfer").toFixed(2),
     sum("expenses").toFixed(2), "", sum("amount").toFixed(2)]);
   const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
