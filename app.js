@@ -315,7 +315,7 @@ function renderLog(id, view) {
       else if (NUMERIC.has(f.key)) v = Number(v);
       row[f.key] = v;
     }
-    const missing = def.fields.filter(f => f.req && (row[f.key] === null || row[f.key] === undefined));
+    const missing = def.fields.filter(f => (f.req || f.type === "employee") && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
     if (missing.length) { msg.textContent = "Fill required (*) fields."; msg.className = "msg err"; return; }
     saveBtn.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
     const { error } = await sb.from(def.table).insert([row]);
@@ -826,10 +826,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Company 1 — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=urtwoalo&dl=0" },
-  { label: "Company 2 — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qylzd88a&dl=0" },
-  { label: "Company 3 — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=qa92owfw&dl=0" },
-  { label: "Company 4 — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=qy2zk22r&dl=0" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+  { label: "Company 2 — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
+  { label: "Company 3 — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
+  { label: "Company 4 — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
 ];
 
 async function renderLeave(view) {
@@ -1354,6 +1354,8 @@ async function renderCashManager(view) {
   card.append(b); view.append(card);
 
   save.onclick = async () => {
+    if (!recordedBy.value) { msg.textContent = "Choose Recorded by."; msg.className = "msg err"; return; }
+    if (!tillBy.value) { msg.textContent = "Choose Till Closed By."; msg.className = "msg err"; return; }
     if (cashI.value === "") { msg.textContent = "Enter the cash on hand."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
     const { error } = await sb.rpc("cash_manager_insert", { p_date: dateI.value, p_recorded_by: recordedBy.value || null, p_till: tillBy.value || null, p_cash: Number(cashI.value) });
@@ -1462,6 +1464,8 @@ async function renderCashAdmin(view) {
   save.onclick = async () => {
     const site_id = Number(siteSel.value);
     if (!site_id || !inputs.entry_date.value) { msg.textContent = "Site and Date are required."; msg.className = "msg err"; return; }
+    if (!inputs.closed_by.value) { msg.textContent = "Choose Recorded by."; msg.className = "msg err"; return; }
+    if (!inputs.till_closed_by.value) { msg.textContent = "Choose Till Closed By."; msg.className = "msg err"; return; }
     const row = { site_id };
     CASH_FIELDS.forEach(f => { let v = inputs[f.k].value; if (v === "") v = null; else if (CASH_NUM.has(f.k)) v = Number(v); row[f.k] = v; });
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
