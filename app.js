@@ -132,7 +132,6 @@ const LOGS = {
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
-      { key: "petty_cash", label: "Petty Cash", type: "text", req: true },
       { key: "description", label: "Description of expense", type: "textarea", req: true },
       { key: "amount", label: "Amount $", type: "number", req: true }
     ]
