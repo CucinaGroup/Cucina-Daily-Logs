@@ -220,7 +220,7 @@ async function boot() {
       { id: "petty_cash", label: "Petty Cash Log" }
     ]},
     { header: "Documents & Requests", items: [
-      { id: "leave", label: "Leave" },
+      { id: "", label: "" },
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" }
     ]},
@@ -265,7 +265,7 @@ function openTab(id) {
   const view = $("#view"); view.innerHTML = "";
   if (id === "order") return renderOrder(view);
   if (id === "catalogue") return renderCatalogue(view);
-  if (id === "leave") return renderLeave(view);
+  if (id === "") return renderLeave(view);
   if (id === "pestcon") return renderPestcon(view);
   if (id === "msds") return renderMSDS(view);
   if (id === "cash") return renderCashSales(view);
@@ -849,10 +849,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
-  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
-  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
-  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
+  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+  { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
+  { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
+  { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
 ];
 
 async function renderLeave(view) {
