@@ -99,7 +99,8 @@ const LOGS = {
       { key: "entry_time", label: "Collection time", type: "select", options: [{ value: "10:00", label: "10:00 AM" }, { value: "17:00", label: "5:00 PM" }], req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "area", label: "Area", ...SEL("FOH","BOH") },
-      { key: "type", label: "Unit", ...SEL("Freezer","Fridge","Walk-in Coolroom Fridge","Walk-in Freezer") },
+      { key: "type", label: "Unit type", ...SEL("Freezer","Fridge","Walk-in Coolroom Fridge","Walk-in Freezer") },
+      { key: "unit_no", label: "Unit number", type: "text" },
       { key: "temp", label: "Temp °C", type: "number" },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "corrective_action", label: "Corrective action", type: "textarea" }
@@ -123,9 +124,19 @@ const LOGS = {
       { key: "cost", label: "Cost $", type: "number" },
       { key: "verified_by", label: "Verified by", type: "text" }
     ]
+  },
+  petty_cash: {
+    label: "Petty Cash Log", table: "petty_cash", totals: ["amount"],
+    fields: [
+      { key: "entry_date", label: "Date", type: "date", req: true },
+      { key: "site_id", label: "Site", type: "site", req: true },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
+      { key: "petty_cash", label: "Petty Cash", type: "text", req: true },
+      { key: "amount", label: "Amount $", type: "number", req: true }
+    ]
   }
 };
-const NUMERIC = new Set(["temp","weight","quantity","cost","cook_temp","reheat_temp","hot_holding_temp","site_id"]);
+const NUMERIC = new Set(["temp","weight","quantity","cost","amount","cook_temp","reheat_temp","hot_holding_temp","site_id"]);
 
 /* ===================== AUTH ===================== */
 let SITES = [];
@@ -205,7 +216,8 @@ async function boot() {
       { id: "process_mep", label: "Process - MEP Temp Log" },
       { id: "process_risky", label: "Process - Risky Temp Log" },
       { id: "process_freezer", label: "Process - Freeze Temp Log" },
-      { id: "food_waste", label: "Food Wastage Log" }
+      { id: "food_waste", label: "Food Wastage Log" },
+      { id: "petty_cash", label: "Petty Cash Log" }
     ]},
     { header: "Documents & Requests", items: [
       { id: "leave", label: "Leave" },
@@ -391,7 +403,7 @@ async function loadTable(id, card, flt = {}) {
           : el("span", { className: "badge " + (r.within_range ? "ok" : "bad"), textContent: r.within_range ? "OK" : "CHECK" }));
       if (c.key === "site_id") return el("td", { textContent: siteName(r.site_id) });
       let v = r[c.key]; if (v == null) v = "";
-      if (c.key === "cost" && v !== "") v = "$" + Number(v).toFixed(2);
+      if ((c.key === "cost" || c.key === "amount") && v !== "") v = "$" + Number(v).toFixed(2);
       return el("td", { textContent: String(v) });
     })));
   });
@@ -402,7 +414,7 @@ async function loadTable(id, card, flt = {}) {
       if (i === 0) tf.append(el("td", { textContent: "TOTAL" }));
       else if (def.totals.includes(c.key)) {
         const sum = LAST_ROWS.reduce((a, r) => a + (Number(r[c.key]) || 0), 0);
-        tf.append(el("td", { textContent: c.key === "cost" ? "$" + sum.toFixed(2) : sum.toFixed(2) }));
+        tf.append(el("td", { textContent: (c.key === "cost" || c.key === "amount") ? "$" + sum.toFixed(2) : sum.toFixed(2) }));
       } else tf.append(el("td", {}));
     });
     table.append(el("tfoot", {}, tf));
@@ -837,10 +849,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
-  { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
-  { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
-  { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
+  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
+  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
+  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
 ];
 
 async function renderLeave(view) {
