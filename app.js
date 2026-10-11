@@ -48,7 +48,7 @@ function procDef(label, category, opts = {}) {
     ? { key: "entry_time", label: "Collection time", type: "select", options: opts.timeSlots, req: true }
     : { key: "entry_time", label: "Time", type: "select", options: TIME_OPTIONS, req: true };
   return {
-    label, table: "process_logs", fixed: { category },
+    label, table: "process_logs", fixed: { category }, editable: true,
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       timeField,
@@ -73,7 +73,7 @@ const LOGS = {
     columns: ["code","name","brand","location"]
   },
   deliveries: {
-    label: "Delivery Temp Log", table: "deliveries",
+    label: "Delivery Temp Log", table: "deliveries", editable: true,
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "entry_time", label: "Time", type: "time" },
@@ -93,7 +93,7 @@ const LOGS = {
     ]
   },
   fridge_freezer: {
-    label: "Fridge/Freezer Temp Log", table: "fridge_freezer",
+    label: "Fridge/Freezer Temp Log", table: "fridge_freezer", editable: true,
     fields: [
       { key: "entry_date", label: "Date", type: "today", req: true },
       { key: "entry_time", label: "Collection time", type: "select", options: [{ value: "10:00", label: "10:00 AM" }, { value: "17:00", label: "5:00 PM" }], req: true },
@@ -127,11 +127,13 @@ const LOGS = {
   },
   petty_cash: {
     label: "Petty Cash Log", table: "petty_cash", totals: ["amount"],
+    intro: "This record is used to track and monitor all petty cash transactions for each store. Everyone is required to record every expense accurately, including the date, description of the purchase, amount spent, and remaining cash balance. All expenses must be supported by valid receipts or proof of purchase.\n\nPlease ensure that all entries are complete, accurate, and updated promptly to maintain proper financial records and accountability.",
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
       { key: "petty_cash", label: "Petty Cash", type: "text", req: true },
+      { key: "description", label: "Description of expense", type: "textarea", req: true },
       { key: "amount", label: "Amount $", type: "number", req: true }
     ]
   }
@@ -220,7 +222,7 @@ async function boot() {
       { id: "petty_cash", label: "Petty Cash Log" }
     ]},
     { header: "Documents & Requests", items: [
-      { id: "", label: "" },
+      { id: "leave", label: "Leave" },
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" }
     ]},
@@ -265,7 +267,7 @@ function openTab(id) {
   const view = $("#view"); view.innerHTML = "";
   if (id === "order") return renderOrder(view);
   if (id === "catalogue") return renderCatalogue(view);
-  if (id === "") return renderLeave(view);
+  if (id === "leave") return renderLeave(view);
   if (id === "pestcon") return renderPestcon(view);
   if (id === "msds") return renderMSDS(view);
   if (id === "cash") return renderCashSales(view);
@@ -278,8 +280,19 @@ function openTab(id) {
 function renderLog(id, view) {
   const def = LOGS[id];
 
+  // Optional introduction / instructions card at the top of the tab.
+  if (def.intro) {
+    const intro = el("div", { className: "card" });
+    intro.append(el("h2", { textContent: def.label }));
+    const ib = el("div", { className: "body" });
+    def.intro.split("\n\n").forEach(p => ib.append(el("p", { textContent: p, style: "margin:0 0 10px;line-height:1.5" })));
+    intro.append(ib); view.append(intro);
+  }
+
+  const editState = { id: null };
   const form = el("div", { className: "card" });
-  form.append(el("h2", { textContent: "New entry — " + def.label }));
+  const formHead = el("h2", { textContent: "New entry — " + def.label });
+  form.append(formHead);
   const body = el("div", { className: "body" });
   const grid = el("div", { className: "formgrid" });
   const inputs = {};
@@ -318,8 +331,18 @@ function renderLog(id, view) {
   body.append(grid);
   const msg = el("span", { className: "msg" });
   const saveBtn = el("button", { className: "btn", textContent: "Save entry" });
-  body.append(el("div", { className: "actions" }, [saveBtn, msg]));
+  const cancelBtn = el("button", { className: "btn ghost", textContent: "Cancel edit", style: "display:none" });
+  body.append(el("div", { className: "actions" }, [saveBtn, cancelBtn, msg]));
   form.append(body); if (!IS_FINANCE) view.append(form);
+
+  function resetForm() {
+    editState.id = null;
+    formHead.textContent = "New entry — " + def.label;
+    saveBtn.textContent = "Save entry";
+    cancelBtn.style.display = "none";
+    def.fields.forEach(f => { if (!["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = ""; });
+  }
+  cancelBtn.onclick = () => { resetForm(); msg.textContent = ""; msg.className = "msg"; };
 
   saveBtn.onclick = async () => {
     const row = { ...(def.fixed || {}) };
@@ -331,12 +354,14 @@ function renderLog(id, view) {
     }
     const missing = def.fields.filter(f => (f.req || f.type === "employee") && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
     if (missing.length) { msg.textContent = "Fill required (*) fields."; msg.className = "msg err"; return; }
-    saveBtn.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.from(def.table).insert([row]);
+    saveBtn.disabled = true; msg.textContent = editState.id ? "Updating…" : "Saving…"; msg.className = "msg";
+    const { error } = editState.id
+      ? await sb.from(def.table).update(row).eq("id", editState.id)
+      : await sb.from(def.table).insert([row]);
     saveBtn.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
-    msg.textContent = "Saved ✓"; msg.className = "msg ok";
-    def.fields.forEach(f => { if (!["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = ""; });
+    msg.textContent = editState.id ? "Updated ✓" : "Saved ✓"; msg.className = "msg ok";
+    resetForm();
     if (def.isSites) { await loadSites(); }
     loadTable(id, listCard);
   };
@@ -363,6 +388,25 @@ function renderLog(id, view) {
   }
   lbody.append(el("div", { className: "tablewrap" }));
   listCard.append(lbody); view.append(listCard);
+
+  // Per-row editing for the logs that allow it (not Food Wastage / Petty Cash,
+  // and never for Finance, who is view-only).
+  if (def.editable && !IS_FINANCE) {
+    listCard._onEdit = (r) => {
+      editState.id = r.id;
+      def.fields.forEach(f => {
+        const inp = inputs[f.key];
+        let v = r[f.key];
+        inp.value = (v === null || v === undefined) ? "" : v;
+      });
+      formHead.textContent = "Edit entry — " + def.label;
+      saveBtn.textContent = "Update entry";
+      cancelBtn.style.display = "";
+      msg.textContent = ""; msg.className = "msg";
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
+
   loadTable(id, listCard);
 }
 
@@ -393,11 +437,14 @@ async function loadTable(id, card, flt = {}) {
   if (!LAST_ROWS.length) { tw.innerHTML = "<div class='empty'>No records yet.</div>"; return; }
 
   const cols = tableColumns(def);
+  const canEdit = !!card._onEdit;
+  const headCells = cols.map(c => el("th", { textContent: c.label }));
+  if (canEdit) headCells.push(el("th", { textContent: "" }));
   const table = el("table");
-  table.append(el("thead", {}, el("tr", {}, cols.map(c => el("th", { textContent: c.label })))));
+  table.append(el("thead", {}, el("tr", {}, headCells)));
   const tb = el("tbody");
   LAST_ROWS.forEach(r => {
-    tb.append(el("tr", {}, cols.map(c => {
+    const cells = cols.map(c => {
       if (c.key === "within_range")
         return el("td", {}, r.within_range == null ? el("span", {}, "")
           : el("span", { className: "badge " + (r.within_range ? "ok" : "bad"), textContent: r.within_range ? "OK" : "CHECK" }));
@@ -405,7 +452,9 @@ async function loadTable(id, card, flt = {}) {
       let v = r[c.key]; if (v == null) v = "";
       if ((c.key === "cost" || c.key === "amount") && v !== "") v = "$" + Number(v).toFixed(2);
       return el("td", { textContent: String(v) });
-    })));
+    });
+    if (canEdit) cells.push(el("td", {}, el("button", { className: "btn ghost", textContent: "Edit", onclick: () => card._onEdit(r) })));
+    tb.append(el("tr", {}, cells));
   });
   table.append(tb);
   if (def.totals) {
@@ -417,6 +466,7 @@ async function loadTable(id, card, flt = {}) {
         tf.append(el("td", { textContent: (c.key === "cost" || c.key === "amount") ? "$" + sum.toFixed(2) : sum.toFixed(2) }));
       } else tf.append(el("td", {}));
     });
+    if (canEdit) tf.append(el("td", {}));
     table.append(el("tfoot", {}, tf));
   }
   tw.innerHTML = ""; tw.append(table);
@@ -849,7 +899,7 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+   { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
