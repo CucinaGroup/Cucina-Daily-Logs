@@ -138,6 +138,8 @@ const LOGS = {
   },
   repair_logs: {
     label: "Repair Logs", table: "repair_logs", editable: true, photoBucket: "repair-photos",
+    editRoles: ["site","manager","admin"],       // everyone (not Finance) can mark it resolved
+    editFields: ["resolved","resolved_date"],    // non-admins may only set these; admin edits all
     fields: [
       { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
@@ -146,12 +148,12 @@ const LOGS = {
       { key: "brand", label: "Brand", type: "text" },
       { key: "supplier", label: "Supplier", type: "text" },
       { key: "serial_no", label: "Serial number", type: "text" },
+      { key: "under_warranty", label: "Under warranty", ...SEL("Yes","No") },
       { key: "issue", label: "Issue", type: "textarea" },
       { key: "resolved", label: "Resolved", ...SEL("Yes","No") },
       { key: "resolved_date", label: "Resolved date", type: "date" },
       { key: "repaired_by", label: "Repaired by", type: "text" },
       { key: "confirmed_by", label: "Confirmed by", type: "text" },
-      { key: "under_warranty", label: "Under warranty", ...SEL("Yes","No") },
       { key: "paid", label: "Paid", ...SEL("Yes","No") },
       { key: "date_paid", label: "Date paid", type: "date" },
       { key: "photo", label: "Photo (reference)", type: "photo" }
@@ -159,35 +161,16 @@ const LOGS = {
   },
   leverage: {
     label: "Leverage Form", table: "leverage_forms", editable: true,
-    intro: "Choose your answer below. Kindly complete the appropriate section of the form based on your current status. If you are returning an item, please leave the borrowing section blank; if you are borrowing an item, kindly leave the returning section blank. Thank you for your cooperation.",
+    editRoles: ["site","manager","admin"],       // everyone (not Finance) can update the status
+    editFields: ["status","return_date"],        // non-admins may only set these; admin edits all
+    intro: "Log items borrowed between sites. Once an item is returned, open the entry, set the Status to Returned and fill the Return date.",
     fields: [
-      { key: "entry_date", label: "Timestamp", type: "today", req: true },
+      { key: "entry_date", label: "Date", type: "date", req: true },
       { key: "site_id", label: "Site", type: "site", req: true },
-      { key: "action", label: "Choose your answer", ...SEL("Borrowing","Returning"), req: true },
-
-      { type: "section", label: "Borrowing section" },
-      { key: "borrower_name", label: "Borrower staff name", type: "text" },
-      { key: "borrowed_items", label: "Description of borrowed item/s (item name and quantity)", type: "textarea" },
-      { key: "reason", label: "Reason of borrowing", type: "textarea" },
-      { key: "start_date", label: "Start date of leverage", type: "date" },
-      { key: "return_terms", label: "Terms of leverage (return date)", type: "date" },
-      { key: "borrower_email", label: "Borrower staff's email address", type: "email" },
-      { key: "issuing_name", label: "Issuing staff name (hands over / authorises release of the item)", type: "text" },
-      { type: "note", text: "I, the borrower, agree to use the leveraged resources solely for the specified purpose and to return them by the agreed date. The borrower is responsible for the condition of the items, and any damage or loss will incur replacement or repair costs." },
-      { key: "borrower_agree", label: "Borrower agreement", ...SEL("I agree") },
-
-      { type: "section", label: "Returning section" },
-      { key: "returning_name", label: "Returning staff name", type: "text" },
-      { key: "returning_email", label: "Returning staff's email address", type: "email" },
-      { key: "returned_items", label: "Description of returned item/s (item name and quantity)", type: "textarea" },
-      { key: "receiving_name", label: "Receiving staff name (receives the borrowed item at the site)", type: "text" },
-      { key: "return_date", label: "Return date of leverage", type: "date" },
-      { type: "note", text: "I, the returner of the borrowed items, acknowledge that the receiving staff has confirmed the return of the items. Both the returner and receiving staff agree that the items have been inspected and found to be in acceptable condition, barring normal wear and tear. Any discrepancies, damages, or missing items will be noted by the receiving staff, and the returner may be held liable for replacement or repair costs. The return is considered complete once acknowledged by the receiving staff." },
-      { key: "returner_agree", label: "Returner acknowledgement", ...SEL("I acknowledge") },
-
-      { type: "section", label: "Locations" },
-      { key: "borrowing_location", label: "Borrowing location", type: "text" },
-      { key: "return_location", label: "Return location", type: "text" }
+      { key: "item", label: "Item", type: "select", options: PROCESS_ITEMS, req: true },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
+      { key: "status", label: "Status", ...SEL("Pending","Returned"), default: "Pending" },
+      { key: "return_date", label: "Return date", type: "date" }
     ]
   }
 };
@@ -345,6 +328,7 @@ function renderLog(id, view) {
   }
 
   const editState = { id: null };
+  const lockedKeys = new Set();   // inputs that are always disabled (today date, locked site)
   const form = el("div", { className: "card" });
   const formHead = el("h2", { textContent: "New entry — " + def.label });
   form.append(formHead);
@@ -368,6 +352,7 @@ function renderLog(id, view) {
     if (f.type === "select") {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
       f.options.forEach(o => { const v = (o && typeof o === "object") ? o.value : o; const t = (o && typeof o === "object") ? o.label : o; input.append(el("option", { value: v, textContent: t })); });
+      if (f.default) input.value = f.default;
     } else if (f.type === "today") {
       input = el("input", { type: "date" });
       input.value = new Date().toLocaleDateString("en-CA");
@@ -393,7 +378,7 @@ function renderLog(id, view) {
     } else {
       input = el("input", { type: f.type });
     }
-    inputs[f.key] = input; wrap.append(input); grid.append(wrap);
+    inputs[f.key] = input; if (input.disabled) lockedKeys.add(f.key); wrap.append(input); grid.append(wrap);
   });
   body.append(grid);
   const msg = el("span", { className: "msg" });
@@ -408,7 +393,11 @@ function renderLog(id, view) {
     formHead.textContent = "New entry — " + def.label;
     saveBtn.textContent = "Save entry";
     cancelBtn.style.display = "none";
-    def.fields.forEach(f => { if (inputs[f.key] && !["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = ""; });
+    def.fields.forEach(f => {
+      if (!inputs[f.key]) return;
+      if (!["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = f.default || "";
+      inputs[f.key].disabled = lockedKeys.has(f.key);   // restore baseline (undo any edit-time lock)
+    });
   }
   cancelBtn.onclick = () => { resetForm(); msg.textContent = ""; msg.className = "msg"; };
 
@@ -471,23 +460,36 @@ function renderLog(id, view) {
   lbody.append(el("div", { className: "tablewrap" }));
   listCard.append(lbody); view.append(listCard);
 
-  // Per-row editing for the logs that allow it (not Food Wastage / Petty Cash,
-  // and never for Finance, who is view-only).
-  if (def.editable && !IS_FINANCE) {
+  // Who may edit a saved entry. Default: anyone who can write (not Finance).
+  // A log may instead name editRoles to restrict the Edit button by role.
+  let allowEdit;
+  if (def.editRoles) {
+    allowEdit = (IS_ADMIN && def.editRoles.includes("admin")) ||
+                (IS_MANAGER && def.editRoles.includes("manager")) ||
+                (!IS_ADMIN && !IS_MANAGER && !IS_FINANCE && def.editRoles.includes("site"));
+  } else {
+    allowEdit = def.editable && !IS_FINANCE;
+  }
+
+  if (allowEdit) {
+    // On a log with editFields, any non-admin editor may change only those fields.
+    const restrictTo = (!IS_ADMIN && def.editFields) ? def.editFields : null;
+    const allowedLabels = restrictTo ? def.fields.filter(f => restrictTo.includes(f.key)).map(f => f.label).join(" and ") : "";
     listCard._onEdit = (r) => {
       editState.id = r.id;
       editState.photos = {};
       def.fields.forEach(f => {
         if (f.type === "note" || f.type === "section") return;
-        if (f.type === "photo") { editState.photos[f.key] = r[f.key] || null; inputs[f.key].value = ""; return; }
-        const inp = inputs[f.key];
-        let v = r[f.key];
-        inp.value = (v === null || v === undefined) ? "" : v;
+        if (f.type === "photo") { editState.photos[f.key] = r[f.key] || null; inputs[f.key].value = ""; }
+        else { const v = r[f.key]; inputs[f.key].value = (v === null || v === undefined) ? "" : v; }
+        // lock everything except the allowed fields when a manager is restricted
+        if (inputs[f.key]) inputs[f.key].disabled = lockedKeys.has(f.key) || (restrictTo && !restrictTo.includes(f.key));
       });
       formHead.textContent = "Edit entry — " + def.label;
       saveBtn.textContent = "Update entry";
       cancelBtn.style.display = "";
-      msg.textContent = ""; msg.className = "msg";
+      msg.textContent = restrictTo ? ("You can update: " + allowedLabels + ".") : "";
+      msg.className = "msg";
       form.scrollIntoView({ behavior: "smooth", block: "start" });
     };
   }
@@ -987,7 +989,7 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-   { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
