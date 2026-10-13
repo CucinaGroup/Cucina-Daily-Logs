@@ -135,6 +135,60 @@ const LOGS = {
       { key: "description", label: "Description of expense", type: "textarea", req: true },
       { key: "amount", label: "Amount $", type: "number", req: true }
     ]
+  },
+  repair_logs: {
+    label: "Repair Logs", table: "repair_logs", editable: true, photoBucket: "repair-photos",
+    fields: [
+      { key: "entry_date", label: "Date", type: "date", req: true },
+      { key: "site_id", label: "Site", type: "site", req: true },
+      { key: "reported_by", label: "Reported by", type: "employee" },
+      { key: "equipment", label: "Equipment", type: "text", req: true },
+      { key: "brand", label: "Brand", type: "text" },
+      { key: "supplier", label: "Supplier", type: "text" },
+      { key: "serial_no", label: "Serial number", type: "text" },
+      { key: "issue", label: "Issue", type: "textarea" },
+      { key: "resolved", label: "Resolved", ...SEL("Yes","No") },
+      { key: "resolved_date", label: "Resolved date", type: "date" },
+      { key: "repaired_by", label: "Repaired by", type: "text" },
+      { key: "confirmed_by", label: "Confirmed by", type: "text" },
+      { key: "under_warranty", label: "Under warranty", ...SEL("Yes","No") },
+      { key: "paid", label: "Paid", ...SEL("Yes","No") },
+      { key: "date_paid", label: "Date paid", type: "date" },
+      { key: "photo", label: "Photo (reference)", type: "photo" }
+    ]
+  },
+  leverage: {
+    label: "Leverage Form", table: "leverage_forms", editable: true,
+    intro: "Choose your answer below. Kindly complete the appropriate section of the form based on your current status. If you are returning an item, please leave the borrowing section blank; if you are borrowing an item, kindly leave the returning section blank. Thank you for your cooperation.",
+    fields: [
+      { key: "entry_date", label: "Timestamp", type: "today", req: true },
+      { key: "site_id", label: "Site", type: "site", req: true },
+      { key: "action", label: "Choose your answer", ...SEL("Borrowing","Returning"), req: true },
+
+      { type: "section", label: "Borrowing section" },
+      { key: "borrower_name", label: "Borrower staff name", type: "text" },
+      { key: "borrowed_items", label: "Description of borrowed item/s (item name and quantity)", type: "textarea" },
+      { key: "reason", label: "Reason of borrowing", type: "textarea" },
+      { key: "start_date", label: "Start date of leverage", type: "date" },
+      { key: "return_terms", label: "Terms of leverage (return date)", type: "date" },
+      { key: "borrower_email", label: "Borrower staff's email address", type: "email" },
+      { key: "issuing_name", label: "Issuing staff name (hands over / authorises release of the item)", type: "text" },
+      { type: "note", text: "I, the borrower, agree to use the leveraged resources solely for the specified purpose and to return them by the agreed date. The borrower is responsible for the condition of the items, and any damage or loss will incur replacement or repair costs." },
+      { key: "borrower_agree", label: "Borrower agreement", ...SEL("I agree") },
+
+      { type: "section", label: "Returning section" },
+      { key: "returning_name", label: "Returning staff name", type: "text" },
+      { key: "returning_email", label: "Returning staff's email address", type: "email" },
+      { key: "returned_items", label: "Description of returned item/s (item name and quantity)", type: "textarea" },
+      { key: "receiving_name", label: "Receiving staff name (receives the borrowed item at the site)", type: "text" },
+      { key: "return_date", label: "Return date of leverage", type: "date" },
+      { type: "note", text: "I, the returner of the borrowed items, acknowledge that the receiving staff has confirmed the return of the items. Both the returner and receiving staff agree that the items have been inspected and found to be in acceptable condition, barring normal wear and tear. Any discrepancies, damages, or missing items will be noted by the receiving staff, and the returner may be held liable for replacement or repair costs. The return is considered complete once acknowledged by the receiving staff." },
+      { key: "returner_agree", label: "Returner acknowledgement", ...SEL("I acknowledge") },
+
+      { type: "section", label: "Locations" },
+      { key: "borrowing_location", label: "Borrowing location", type: "text" },
+      { key: "return_location", label: "Return location", type: "text" }
+    ]
   }
 };
 const NUMERIC = new Set(["temp","weight","quantity","cost","amount","cook_temp","reheat_temp","hot_holding_temp","site_id"]);
@@ -218,10 +272,12 @@ async function boot() {
       { id: "process_risky", label: "Process - Risky Temp Log" },
       { id: "process_freezer", label: "Process - Freeze Temp Log" },
       { id: "food_waste", label: "Food Wastage Log" },
-      { id: "petty_cash", label: "Petty Cash Log" }
+      { id: "petty_cash", label: "Petty Cash Log" },
+      { id: "repair_logs", label: "Repair Logs" }
     ]},
     { header: "Documents & Requests", items: [
       { id: "leave", label: "Leave" },
+      { id: "leverage", label: "Leverage Form" },
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" }
     ]},
@@ -296,6 +352,16 @@ function renderLog(id, view) {
   const grid = el("div", { className: "formgrid" });
   const inputs = {};
   def.fields.forEach(f => {
+    if (f.type === "section") {
+      grid.append(el("div", { className: "field", style: "grid-column:1 / -1" },
+        el("h3", { textContent: f.label, style: "margin:8px 0 0;color:#141414;border-bottom:2px solid #FFD100;padding-bottom:4px" })));
+      return;
+    }
+    if (f.type === "note") {
+      grid.append(el("div", { className: "field", style: "grid-column:1 / -1" },
+        el("p", { textContent: f.text, style: "margin:0;font-size:13px;line-height:1.5;color:#555" })));
+      return;
+    }
     const wrap = el("div", { className: "field" });
     wrap.append(el("label", { textContent: f.label + (f.req ? " *" : "") }));
     let input;
@@ -322,6 +388,8 @@ function renderLog(id, view) {
       if (!MULTI && !IS_ADMIN && MY_SITE) { input.value = MY_SITE.id; input.disabled = true; }
     } else if (f.type === "textarea") {
       input = el("textarea");
+    } else if (f.type === "photo") {
+      input = el("input", { type: "file", accept: "image/*" });
     } else {
       input = el("input", { type: f.type });
     }
@@ -336,16 +404,18 @@ function renderLog(id, view) {
 
   function resetForm() {
     editState.id = null;
+    editState.photos = null;
     formHead.textContent = "New entry — " + def.label;
     saveBtn.textContent = "Save entry";
     cancelBtn.style.display = "none";
-    def.fields.forEach(f => { if (!["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = ""; });
+    def.fields.forEach(f => { if (inputs[f.key] && !["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = ""; });
   }
   cancelBtn.onclick = () => { resetForm(); msg.textContent = ""; msg.className = "msg"; };
 
   saveBtn.onclick = async () => {
     const row = { ...(def.fixed || {}) };
     for (const f of def.fields) {
+      if (f.type === "photo" || f.type === "note" || f.type === "section") continue;   // no stored value
       let v = inputs[f.key].value;
       if (v === "") v = null;
       else if (NUMERIC.has(f.key)) v = Number(v);
@@ -354,6 +424,19 @@ function renderLog(id, view) {
     const missing = def.fields.filter(f => (f.req || f.type === "employee") && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
     if (missing.length) { msg.textContent = "Fill required (*) fields."; msg.className = "msg err"; return; }
     saveBtn.disabled = true; msg.textContent = editState.id ? "Updating…" : "Saving…"; msg.className = "msg";
+    // Upload any photo fields; keep the existing photo when editing without a new file.
+    for (const f of def.fields) {
+      if (f.type !== "photo") continue;
+      const file = inputs[f.key].files && inputs[f.key].files[0];
+      if (file) {
+        const path = def.table + "/" + Date.now() + "_" + file.name.replace(/[^\w.\-]/g, "_");
+        const { error: upErr } = await sb.storage.from(def.photoBucket).upload(path, file);
+        if (upErr) { saveBtn.disabled = false; msg.textContent = "Photo upload: " + upErr.message; msg.className = "msg err"; return; }
+        row[f.key] = sb.storage.from(def.photoBucket).getPublicUrl(path).data.publicUrl;
+      } else {
+        row[f.key] = (editState.photos && editState.photos[f.key]) || null;
+      }
+    }
     const { error } = editState.id
       ? await sb.from(def.table).update(row).eq("id", editState.id)
       : await sb.from(def.table).insert([row]);
@@ -393,7 +476,10 @@ function renderLog(id, view) {
   if (def.editable && !IS_FINANCE) {
     listCard._onEdit = (r) => {
       editState.id = r.id;
+      editState.photos = {};
       def.fields.forEach(f => {
+        if (f.type === "note" || f.type === "section") return;
+        if (f.type === "photo") { editState.photos[f.key] = r[f.key] || null; inputs[f.key].value = ""; return; }
         const inp = inputs[f.key];
         let v = r[f.key];
         inp.value = (v === null || v === undefined) ? "" : v;
@@ -411,7 +497,7 @@ function renderLog(id, view) {
 
 function tableColumns(def) {
   if (def.isSites) return def.columns.map(k => ({ key: k, label: k }));
-  const cols = def.fields.map(f => ({ key: f.key, label: f.label }));
+  const cols = def.fields.filter(f => f.key && f.type !== "note" && f.type !== "section").map(f => ({ key: f.key, label: f.label }));
   (def.extraCols || []).forEach(k => cols.splice(6, 0, { key: k, label: "Within range" }));
   return cols;
 }
@@ -436,6 +522,7 @@ async function loadTable(id, card, flt = {}) {
   if (!LAST_ROWS.length) { tw.innerHTML = "<div class='empty'>No records yet.</div>"; return; }
 
   const cols = tableColumns(def);
+  const photoKeys = new Set((def.fields || []).filter(f => f.type === "photo").map(f => f.key));
   const canEdit = !!card._onEdit;
   const headCells = cols.map(c => el("th", { textContent: c.label }));
   if (canEdit) headCells.push(el("th", { textContent: "" }));
@@ -448,6 +535,8 @@ async function loadTable(id, card, flt = {}) {
         return el("td", {}, r.within_range == null ? el("span", {}, "")
           : el("span", { className: "badge " + (r.within_range ? "ok" : "bad"), textContent: r.within_range ? "OK" : "CHECK" }));
       if (c.key === "site_id") return el("td", { textContent: siteName(r.site_id) });
+      if (photoKeys.has(c.key))
+        return el("td", {}, r[c.key] ? el("a", { href: r[c.key], target: "_blank", textContent: "View" }) : el("span", {}, ""));
       let v = r[c.key]; if (v == null) v = "";
       if ((c.key === "cost" || c.key === "amount") && v !== "") v = "$" + Number(v).toFixed(2);
       return el("td", { textContent: String(v) });
