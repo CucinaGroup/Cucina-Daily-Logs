@@ -295,6 +295,16 @@ async function loadSites() {
   SITES = data || [];
 }
 const siteName = id => { const s = SITES.find(x => x.id === id); return s ? `${s.code} · ${s.name}` : ("Site " + id); };
+function brandCode(brand) {
+  if (!brand) return null;
+  const b = String(brand).toLowerCase();
+  if (b.includes("flappy")) return "FL";
+  if (b.includes("burger")) return "BP";
+  if (b.includes("manong")) return "SM";
+  if (b.includes("masa"))   return "MA";
+  return null;
+}
+const mepTimeLabel = v => (MEP_TIMES.find(t => t.value === v) || {}).label || v || "";
 function statusClass(s) { s = s || "Submitted"; if (s === "Accepted" || s === "Purchased" || s === "Approved" || s === "Delivered") return "ok"; if (s === "Rejected") return "bad"; return "pending"; }
 function fieldWrap(label, input) {
   return el("div", { className: "field" }, [el("label", { textContent: label }), input]);
@@ -311,6 +321,7 @@ function openTab(id) {
   if (id === "cash") return renderCashSales(view);
   if (id === "complaints") return renderComplaints(view);
   if (id === "employees") return renderEmployees(view);
+  if (id === "process_mep") return renderMepLog(view);
   return renderLog(id, view);
 }
 
@@ -797,6 +808,8 @@ async function renderOrder(view) {
     b.append(el("div", { className: "sub", textContent: "Ordering for: " + (MY_SITE ? MY_SITE.name : "") }));
   }
 
+  const searchInput = el("input", { type: "search", placeholder: "Search items by name or code…", style: "width:100%;padding:10px;margin-bottom:10px;box-sizing:border-box" });
+  b.append(searchInput);
   const listWrap = el("div"); b.append(listWrap);
   const totalBar = el("div", { className: "order-total" });
   const totalTxt = el("span", { textContent: "Order total: $0.00" });
@@ -816,31 +829,44 @@ async function renderOrder(view) {
     (items || []).forEach(i => { t += (qty[i.id] || 0) * Number(i.price); });
     totalTxt.textContent = "Order total: $" + t.toFixed(2);
   }
-  if (!items || !items.length) {
-    listWrap.innerHTML = "<div class='empty'>No items in the catalogue yet.</div>";
-  } else {
-    (cats || []).forEach(c => {
-      const group = items.filter(i => i.category_id === c.id);
-      if (!group.length) return;
-      listWrap.append(el("div", { className: "cat-group", textContent: c.name }));
-      const grid = el("div", { className: "cat-grid" });
-      group.forEach(i => {
-        const ci = el("div", { className: "item-card" });
-        ci.append(i.photo_url
-          ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
-          : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
-        ci.append(el("div", { className: "item-name", textContent: i.name }));
-        if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
-        if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
-        ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
-        const q = el("input", { type: "number", min: "0", step: "1", value: "0", className: "qty" });
-        q.oninput = () => { qty[i.id] = Number(q.value) || 0; recompute(); };
-        ci.append(fieldWrap("Qty", q));
-        grid.append(ci);
-      });
-      listWrap.append(grid);
-    });
+  function matches(i, term) {
+    if (!term) return true;
+    return (i.name && i.name.toLowerCase().includes(term)) ||
+           (i.merchant_code && String(i.merchant_code).toLowerCase().includes(term)) ||
+           (i.description && i.description.toLowerCase().includes(term));
   }
+  function buildCard(i) {
+    const ci = el("div", { className: "item-card" });
+    ci.append(i.photo_url
+      ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
+      : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
+    ci.append(el("div", { className: "item-name", textContent: i.name }));
+    if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
+    if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
+    ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
+    const q = el("input", { type: "number", min: "0", step: "1", value: String(qty[i.id] || 0), className: "qty" });
+    q.oninput = () => { qty[i.id] = Number(q.value) || 0; recompute(); };
+    ci.append(fieldWrap("Qty", q));
+    return ci;
+  }
+  function drawList(term) {
+    listWrap.innerHTML = "";
+    if (!items || !items.length) { listWrap.innerHTML = "<div class='empty'>No items in the catalogue yet.</div>"; return; }
+    let shown = 0;
+    const section = (title, list) => {
+      const g = list.filter(i => matches(i, term));
+      if (!g.length) return;
+      listWrap.append(el("div", { className: "cat-group", textContent: title }));
+      const grid = el("div", { className: "cat-grid" });
+      g.forEach(i => { grid.append(buildCard(i)); shown++; });
+      listWrap.append(grid);
+    };
+    (cats || []).forEach(c => section(c.name, items.filter(i => i.category_id === c.id)));
+    section("(Uncategorised)", items.filter(i => !(cats || []).some(c => c.id === i.category_id)));
+    if (!shown) listWrap.innerHTML = "<div class='empty'>No items match “" + term + "”.</div>";
+  }
+  searchInput.oninput = () => drawList(searchInput.value.trim().toLowerCase());
+  drawList("");
 
   submit.onclick = async () => {
     if (!orderSite) { omsg.textContent = "Choose a site first."; omsg.className = "msg err"; return; }
@@ -989,7 +1015,7 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+ { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
@@ -1842,4 +1868,149 @@ async function loadComplaints(card) {
   });
   table.append(tb);
   tw.innerHTML = ""; tw.append(table);
+}
+
+/* ===================== MEP TEMP LOG (per-brand preset items) ===================== */
+async function renderMepLog(view) {
+  view.innerHTML = "";
+
+  const card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "New entry — Process - MEP Temp Log" }));
+  const b = el("div", { className: "body" });
+
+  const grid = el("div", { className: "formgrid" });
+  const dateI = el("input", { type: "date" }); dateI.value = new Date().toLocaleDateString("en-CA");
+  const timeSel = el("select"); MEP_TIMES.forEach(o => timeSel.append(el("option", { value: o.value, textContent: o.label })));
+  grid.append(fieldWrap("Date", dateI), fieldWrap("Collection time", timeSel));
+
+  let siteSel = null;
+  if (IS_ADMIN || MULTI) {
+    siteSel = el("select");
+    if (IS_ADMIN) siteSel.append(el("option", { value: "", textContent: "—" }));
+    SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    if (!IS_ADMIN && MY_SITE) siteSel.value = MY_SITE.id;
+    grid.append(fieldWrap("Site", siteSel));
+  }
+  const recSel = el("select"); recSel.append(el("option", { value: "", textContent: "—" }));
+  let empList = EMPLOYEES;
+  if (!IS_ADMIN) { const sid = (MY_SITE && MY_SITE.id) || MGR_SITE; const f = EMPLOYEES.filter(x => Number(x.site_id) === Number(sid)); empList = f.length ? f : EMPLOYEES; }
+  Array.from(new Set(empList.map(x => x.name))).sort((p, q) => p.localeCompare(q)).forEach(n => recSel.append(el("option", { value: n, textContent: n })));
+  grid.append(fieldWrap("Recorded by", recSel));
+  b.append(grid);
+
+  const itemsWrap = el("div"); b.append(itemsWrap);
+  const msg = el("span", { className: "msg" });
+  const saveBtn = el("button", { className: "btn", textContent: "Save temps" });
+  b.append(el("div", { className: "actions" }, [saveBtn, msg]));
+  if (!IS_FINANCE) { card.append(b); view.append(card); }
+
+  const tempInputs = {};
+  const currentSite = () => siteSel ? siteSel.value : (MY_SITE && MY_SITE.id);
+
+  async function loadItemsFor(siteId) {
+    itemsWrap.innerHTML = "";
+    Object.keys(tempInputs).forEach(k => delete tempInputs[k]);
+    if (!siteId) { itemsWrap.append(el("div", { className: "sub", textContent: "Choose a site to load its items." })); return; }
+    const site = SITES.find(s => Number(s.id) === Number(siteId));
+    const code = brandCode(site && site.brand);
+    if (!code) { itemsWrap.append(el("div", { className: "sub", textContent: "No brand preset for this site." })); return; }
+    const { data } = await sb.from("mep_items").select("*").eq("brand", code).eq("active", true).order("position");
+    if (!data || !data.length) { itemsWrap.append(el("div", { className: "sub", textContent: "No preset items for " + code + ". Add them in Supabase (mep_items)." })); return; }
+    itemsWrap.append(el("h3", { textContent: "Items — enter temp (°C)", style: "margin:12px 0 6px" }));
+    const g = el("div", { className: "formgrid" });
+    data.forEach(it => { const inp = el("input", { type: "number", step: "0.1" }); tempInputs[it.item] = inp; g.append(fieldWrap(it.item, inp)); });
+    itemsWrap.append(g);
+  }
+  if (siteSel) siteSel.onchange = () => loadItemsFor(siteSel.value);
+  loadItemsFor(currentSite());
+
+  saveBtn.onclick = async () => {
+    const siteId = currentSite();
+    if (!siteId) { msg.textContent = "Choose a site."; msg.className = "msg err"; return; }
+    if (!recSel.value) { msg.textContent = "Choose who recorded."; msg.className = "msg err"; return; }
+    const rows = [];
+    Object.keys(tempInputs).forEach(item => {
+      const v = tempInputs[item].value;
+      if (v !== "") rows.push({ category: "MEP", entry_date: dateI.value, entry_time: timeSel.value, site_id: Number(siteId), food_item: item, temp: Number(v), recorded_by: recSel.value });
+    });
+    if (!rows.length) { msg.textContent = "Enter at least one temp."; msg.className = "msg err"; return; }
+    saveBtn.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
+    const { error } = await sb.from("process_logs").insert(rows);
+    saveBtn.disabled = false;
+    if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
+    msg.textContent = "Saved ✓ (" + rows.length + " items)"; msg.className = "msg ok";
+    Object.values(tempInputs).forEach(i => i.value = "");
+    loadRecords();
+  };
+
+  // ---- records ----
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Records" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  let fSite = null;
+  if (IS_ADMIN || MULTI) {
+    fSite = el("select"); fSite.append(el("option", { value: "", textContent: "All sites" }));
+    SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    filters.append(fieldWrap("Site", fSite));
+  }
+  const fFrom = el("input", { type: "date" }), fTo = el("input", { type: "date" });
+  filters.append(
+    fieldWrap("From", fFrom), fieldWrap("To", fTo),
+    el("button", { className: "btn ghost", textContent: "Apply", onclick: () => loadRecords() }),
+    el("button", { className: "btn dark", textContent: "Export CSV", onclick: () => mepCSV() })
+  );
+  lb.append(filters);
+  const tw = el("div", { className: "tablewrap" }); lb.append(tw);
+  listCard.append(lb); view.append(listCard);
+
+  let lastRows = [];
+  async function loadRecords() {
+    tw.innerHTML = "<div class='empty'>Loading…</div>";
+    let q = sb.from("process_logs").select("*").eq("category", "MEP").order("entry_date", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+    if (fSite && fSite.value) q = q.eq("site_id", fSite.value);
+    if (fFrom.value) q = q.gte("entry_date", fFrom.value);
+    if (fTo.value) q = q.lte("entry_date", fTo.value);
+    const { data, error } = await q;
+    if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+    lastRows = data || [];
+    if (!lastRows.length) { tw.innerHTML = "<div class='empty'>No records yet.</div>"; return; }
+    const cols = [["entry_date", "Date"], ["entry_time", "Time"], ["site_id", "Site"], ["food_item", "Item"], ["temp", "Temp °C"], ["recorded_by", "Recorded by"]];
+    const table = el("table");
+    const head = cols.map(c => el("th", { textContent: c[1] })); if (!IS_FINANCE) head.push(el("th", { textContent: "" }));
+    table.append(el("thead", {}, el("tr", {}, head)));
+    const tb = el("tbody");
+    lastRows.forEach(r => {
+      const tds = cols.map(c => {
+        if (c[0] === "site_id") return el("td", { textContent: siteName(r.site_id) });
+        if (c[0] === "entry_time") return el("td", { textContent: mepTimeLabel(r.entry_time) });
+        let v = r[c[0]]; return el("td", { textContent: v == null ? "" : String(v) });
+      });
+      if (!IS_FINANCE) {
+        const editBtn = el("button", { className: "btn ghost", textContent: "Edit temp", onclick: () => {
+          const td = tds[4]; td.textContent = "";
+          const inp = el("input", { type: "number", step: "0.1", value: r.temp == null ? "" : String(r.temp), style: "width:80px" });
+          const sv = el("button", { className: "btn small", textContent: "Save", onclick: async () => {
+            const { error } = await sb.from("process_logs").update({ temp: inp.value === "" ? null : Number(inp.value) }).eq("id", r.id);
+            if (error) { alert(error.message); return; }
+            loadRecords();
+          }});
+          td.append(inp, sv);
+        }});
+        tds.push(el("td", {}, editBtn));
+      }
+      tb.append(el("tr", {}, tds));
+    });
+    table.append(tb); tw.innerHTML = ""; tw.append(table);
+  }
+  function mepCSV() {
+    if (!lastRows.length) return;
+    const head = ["Date", "Time", "Site", "Item", "Temp", "Recorded by"];
+    const rows = lastRows.map(r => [r.entry_date, mepTimeLabel(r.entry_time), siteName(r.site_id), r.food_item, r.temp, r.recorded_by]);
+    const csv = [head, ...rows].map(a => a.map(v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: "mep_" + new Date().toISOString().slice(0, 10) + ".csv" });
+    document.body.append(a); a.click(); a.remove();
+  }
+  loadRecords();
 }
