@@ -159,6 +159,22 @@ const LOGS = {
       { key: "photo", label: "Photo (reference)", type: "photo" }
     ]
   },
+  customer_credits: {
+    label: "Customer Complaints / Store Credits", table: "customer_credits", editable: true,
+    fields: [
+      { key: "entry_date", label: "Date", type: "date", req: true },
+      { key: "site_id", label: "Site", type: "site", req: true },
+      { key: "customer_name", label: "Customer name", type: "text" },
+      { key: "customer_number", label: "Customer number", type: "text" },
+      { key: "customer_email", label: "Customer email", type: "email" },
+      { key: "incident", label: "Incident (max 300 characters)", type: "textarea", maxlength: 300 },
+      { key: "action_taken", label: "Action taken", type: "textarea" },
+      { key: "store_credit", label: "Store credit?", ...SEL("Yes","No") },
+      { key: "recorded_by", label: "Recorded by", type: "employee" },
+      { key: "store_credit_by", label: "Store credit given by", type: "text" },
+      { key: "date_claimed", label: "Date claimed store credit", type: "date" }
+    ]
+  },
   leverage: {
     label: "Leverage Form", table: "leverage_forms", editable: true,
     editRoles: ["site","manager","admin"],       // everyone (not Finance) can update the status
@@ -256,7 +272,8 @@ async function boot() {
       { id: "process_freezer", label: "Process - Freeze Temp Log" },
       { id: "food_waste", label: "Food Wastage Log" },
       { id: "petty_cash", label: "Petty Cash Log" },
-      { id: "repair_logs", label: "Repair Logs" }
+      { id: "repair_logs", label: "Repair Logs" },
+      { id: "customer_credits", label: "Customer Complaints / Store Credits" }
     ]},
     { header: "Documents & Requests", items: [
       { id: "leave", label: "Leave" },
@@ -384,6 +401,7 @@ function renderLog(id, view) {
       if (!MULTI && !IS_ADMIN && MY_SITE) { input.value = MY_SITE.id; input.disabled = true; }
     } else if (f.type === "textarea") {
       input = el("textarea");
+      if (f.maxlength) input.maxLength = f.maxlength;
     } else if (f.type === "photo") {
       input = el("input", { type: "file", accept: "image/*" });
     } else {
@@ -1019,6 +1037,7 @@ const LEAVE_TEMPLATES = [
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
+
 ];
 
 async function renderLeave(view) {
