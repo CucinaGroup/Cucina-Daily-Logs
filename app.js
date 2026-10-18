@@ -244,6 +244,7 @@ async function boot() {
   if (booted) return; booted = true;
   await loadSites();
   await loadEmployees();
+  await loadFoodItems();
   try { const { data } = await sb.rpc("is_admin"); IS_ADMIN = !!data; } catch (e) { IS_ADMIN = false; }
   try { const { data } = await sb.rpc("is_manager"); IS_MANAGER = !!data; } catch (e) { IS_MANAGER = false; }
   if (IS_MANAGER) { try { const { data } = await sb.rpc("manager_site_id"); MGR_SITE = data || null; } catch (e) { MGR_SITE = null; } }
@@ -1037,7 +1038,6 @@ const LEAVE_TEMPLATES = [
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
-
 ];
 
 async function renderLeave(view) {
@@ -1357,6 +1357,19 @@ async function loadPestconList(card, flt = {}) {
 async function loadEmployees() {
   const { data } = await sb.from("employees").select("*").eq("active", true).order("name");
   EMPLOYEES = data || [];
+}
+
+// Replace the shared food-items list with the editable Supabase table, if present.
+// Feeds the Risky / Freeze / Food Wastage / Leverage dropdowns. Falls back to the
+// built-in defaults if the table is missing or empty.
+async function loadFoodItems() {
+  try {
+    const { data } = await sb.from("food_items").select("name").eq("active", true).order("name");
+    if (data && data.length) {
+      const names = Array.from(new Set(data.map(r => r.name).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      PROCESS_ITEMS.splice(0, PROCESS_ITEMS.length, ...names);
+    }
+  } catch (e) { /* keep built-in defaults */ }
 }
 
 async function renderEmployees(view) {
