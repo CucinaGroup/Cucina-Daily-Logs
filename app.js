@@ -1034,7 +1034,7 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
- { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+  { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
@@ -1568,10 +1568,11 @@ async function renderCashSales(view) {
 /* ---------- Manager view: on-hand only ---------- */
 async function renderCashManager(view) {
   const card = el("div", { className: "card" });
-  card.append(el("h2", { textContent: "Daily cash — enter today's cash on hand" }));
+  card.append(el("h2", { textContent: "Daily cash — enter cash on hand" }));
   const b = el("div", { className: "body" });
   const grid = el("div", { className: "formgrid" });
-  const dateI = el("input", { type: "date" }); dateI.value = new Date().toLocaleDateString("en-CA"); dateI.disabled = true;
+  const today = new Date().toLocaleDateString("en-CA");
+  const dateI = el("input", { type: "date", max: today }); dateI.value = today;   // today or earlier, not future
   const recordedBy = empSelect();
   const tillBy = empSelect();
   const cashI = el("input", { type: "number", step: "0.01" });
@@ -1583,6 +1584,8 @@ async function renderCashManager(view) {
   card.append(b); view.append(card);
 
   save.onclick = async () => {
+    if (!dateI.value) { msg.textContent = "Choose a date."; msg.className = "msg err"; return; }
+    if (dateI.value > today) { msg.textContent = "Date can't be in the future."; msg.className = "msg err"; return; }
     if (!recordedBy.value) { msg.textContent = "Choose Recorded by."; msg.className = "msg err"; return; }
     if (!tillBy.value) { msg.textContent = "Choose Till Closed By."; msg.className = "msg err"; return; }
     if (cashI.value === "") { msg.textContent = "Enter the cash on hand."; msg.className = "msg err"; return; }
