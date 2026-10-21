@@ -117,7 +117,7 @@ const LOGS = {
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
-      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS },
+      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS, allowOther: true, otherLabel: "Other item — specify" },
       { key: "loss_reason", label: "Loss reason", ...SEL("Closing","Leftover","Spoiled") },
       { key: "quantity", label: "Quantity", type: "number" },
       { key: "unit", label: "Unit", ...SEL("kg","L","ea") },
@@ -366,6 +366,7 @@ function renderLog(id, view) {
   const body = el("div", { className: "body" });
   const grid = el("div", { className: "formgrid" });
   const inputs = {};
+  const otherInputs = {};   // for select fields with allowOther ("Others" → type your own)
   def.fields.forEach(f => {
     if (f.type === "section") {
       grid.append(el("div", { className: "field", style: "grid-column:1 / -1" },
@@ -383,6 +384,7 @@ function renderLog(id, view) {
     if (f.type === "select") {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
       f.options.forEach(o => { const v = (o && typeof o === "object") ? o.value : o; const t = (o && typeof o === "object") ? o.label : o; input.append(el("option", { value: v, textContent: t })); });
+      if (f.allowOther) input.append(el("option", { value: "__other__", textContent: "Others" }));
       if (f.default) input.value = f.default;
     } else if (f.type === "today") {
       input = el("input", { type: "date" });
@@ -411,6 +413,14 @@ function renderLog(id, view) {
       input = el("input", { type: f.type });
     }
     inputs[f.key] = input; if (input.disabled) lockedKeys.add(f.key); wrap.append(input); grid.append(wrap);
+    if (f.type === "select" && f.allowOther) {
+      const ow = el("div", { className: "field", style: "display:none" });
+      ow.append(el("label", { textContent: f.otherLabel || "Specify item" }));
+      const oi = el("input", { type: "text" });
+      ow.append(oi); grid.append(ow);
+      otherInputs[f.key] = oi;
+      input.addEventListener("change", () => { ow.style.display = input.value === "__other__" ? "" : "none"; });
+    }
   });
   body.append(grid);
   const msg = el("span", { className: "msg" });
@@ -430,6 +440,7 @@ function renderLog(id, view) {
       if (!["entry_date","site_id","recorded_by"].includes(f.key)) inputs[f.key].value = f.default || "";
       inputs[f.key].disabled = lockedKeys.has(f.key);   // restore baseline (undo any edit-time lock)
     });
+    Object.values(otherInputs).forEach(oi => { oi.value = ""; const w = oi.closest(".field"); if (w) w.style.display = "none"; });
   }
   cancelBtn.onclick = () => { resetForm(); msg.textContent = ""; msg.className = "msg"; };
 
@@ -438,10 +449,13 @@ function renderLog(id, view) {
     for (const f of def.fields) {
       if (f.type === "photo" || f.type === "note" || f.type === "section") continue;   // no stored value
       let v = inputs[f.key].value;
+      if (f.allowOther && v === "__other__") v = otherInputs[f.key] ? otherInputs[f.key].value.trim() : "";
       if (v === "") v = null;
       else if (NUMERIC.has(f.key)) v = Number(v);
       row[f.key] = v;
     }
+    const otherEmpty = def.fields.find(f => f.allowOther && inputs[f.key] && inputs[f.key].value === "__other__" && (!otherInputs[f.key] || !otherInputs[f.key].value.trim()));
+    if (otherEmpty) { msg.textContent = "Type the item for ‘Others’."; msg.className = "msg err"; return; }
     const missing = def.fields.filter(f => (f.req || f.type === "employee") && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
     if (missing.length) { msg.textContent = "Fill required (*) fields."; msg.className = "msg err"; return; }
     saveBtn.disabled = true; msg.textContent = editState.id ? "Updating…" : "Saving…"; msg.className = "msg";
