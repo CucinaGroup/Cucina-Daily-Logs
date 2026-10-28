@@ -2074,12 +2074,11 @@ async function renderMepLog(view) {
 /* ===================== HALAL CERTIFICATE ===================== */
 async function renderHalal(view) {
   view.innerHTML = "";
-  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
 
   const intro = el("div", { className: "card" });
   const ib = el("div", { className: "body" });
-  ib.append(el("p", { style: "margin:0 0 6px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal provides access to the Halal Certificate for each restaurant site." }));
-  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Please select the relevant site below and download the current Halal Certificate." }));
+  ib.append(el("p", { style: "margin:0 0 6px;font-size:14px;line-height:1.5;color:#333", textContent: "This portal provides access to the group's Halal Certificate." }));
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Download the current Halal Certificate below." }));
   intro.append(ib); view.append(intro);
 
   if (IS_ADMIN) {
@@ -2087,12 +2086,9 @@ async function renderHalal(view) {
     card.append(el("h2", { textContent: "Upload Halal Certificate" }));
     const b = el("div", { className: "body" });
     const grid = el("div", { className: "formgrid" });
-    const siteSel = el("select");
-    siteSel.append(el("option", { value: "", textContent: "— site —" }));
-    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
     const titleI = el("input", { type: "text" });
     const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
-    grid.append(fieldWrap("Site", siteSel), fieldWrap("Certificate title", titleI), fieldWrap("File(s)", fileI));
+    grid.append(fieldWrap("Certificate title", titleI), fieldWrap("File(s)", fileI));
     b.append(grid);
     const msg = el("span", { className: "msg" });
     const save = el("button", { className: "btn", textContent: "Upload" });
@@ -2100,57 +2096,46 @@ async function renderHalal(view) {
     card.append(b); view.append(card);
 
     save.onclick = async () => {
-      const site_id = Number(siteSel.value);
       const files = Array.from(fileI.files || []);
-      if (!site_id || !files.length) { msg.textContent = "Choose a site and at least one file."; msg.className = "msg err"; return; }
+      if (!files.length) { msg.textContent = "Choose at least one file."; msg.className = "msg err"; return; }
       save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
-        const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+        const path = "all/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
         const { error: upErr } = await sb.storage.from("halal").upload(path, f);
         if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
-        const { error } = await sb.from("halal").insert([{ site_id, title: titleI.value || f.name, file_path: path }]);
+        const { error } = await sb.from("halal").insert([{ title: titleI.value || f.name, file_path: path }]);
         if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
       }
       save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
       titleI.value = ""; fileI.value = "";
-      loadHalalList(listCard, { site: siteSel.value });
+      loadHalalList(listCard);
     };
   }
 
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Halal certificates" }));
   const lb = el("div", { className: "body" });
-  const filters = el("div", { className: "filters" });
-  const fSite = el("select");
-  fSite.append(el("option", { value: "", textContent: "All sites" }));
-  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-  filters.append(fieldWrap("Site", fSite),
-    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadHalalList(listCard, { site: fSite.value }) }));
-  lb.append(filters);
   lb.append(el("div", { className: "tablewrap" }));
   listCard.append(lb); view.append(listCard);
   loadHalalList(listCard);
 }
 
-async function loadHalalList(card, flt = {}) {
+async function loadHalalList(card) {
   const tw = card.querySelector(".tablewrap");
   tw.innerHTML = "<div class='empty'>Loading…</div>";
-  let q = sb.from("halal").select("*").order("title").limit(1000);
-  if (flt.site) q = q.eq("site_id", flt.site);
-  const { data, error } = await q;
+  const { data, error } = await sb.from("halal").select("*").order("title").limit(1000);
   if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { tw.innerHTML = "<div class='empty'>No halal certificates yet.</div>"; return; }
   const table = el("table");
-  const head = ["Certificate","Site","File"].concat(IS_ADMIN ? ["Action"] : []);
+  const head = ["Certificate","File"].concat(IS_ADMIN ? ["Action"] : []);
   table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
     const url = sb.storage.from("halal").getPublicUrl(r.file_path).data.publicUrl;
     const cells = [
       el("td", { textContent: r.title || "" }),
-      el("td", { textContent: allSiteName(r.site_id) }),
       el("td", {}, el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Download" }))
     ];
     if (IS_ADMIN) {
@@ -2158,7 +2143,7 @@ async function loadHalalList(card, flt = {}) {
         if (!confirm("Delete this halal certificate?")) return;
         await sb.storage.from("halal").remove([r.file_path]);
         await sb.from("halal").delete().eq("id", r.id);
-        loadHalalList(card, flt);
+        loadHalalList(card);
       }})));
     }
     tb.append(el("tr", {}, cells));
