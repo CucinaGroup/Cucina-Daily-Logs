@@ -1638,34 +1638,20 @@ async function loadCashManager(card) {
   const rows = data || [];
   if (!rows.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
   const table = el("table");
-  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Bank Transfer ($)","Tab Square ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Save"].map(h => el("th", { textContent: h })))));
+  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Bank Transfer ($)","Tab Square ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status"].map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
-    const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:100px" });
-    const bankInp = el("input", { type: "number", step: "0.01", value: r.bank_transfer != null ? r.bank_transfer : "", style: "width:100px" });
-    const tabInp = el("input", { type: "number", step: "0.01", value: r.tab_square != null ? r.tab_square : "", style: "width:100px" });
-    const m = el("span", { className: "msg" });
     tb.append(el("tr", {}, [
       el("td", { textContent: r.entry_date || "" }),
       el("td", { textContent: r.closed_by || "" }),
       el("td", { textContent: r.till_closed_by || "" }),
-      el("td", {}, inp),
-      el("td", {}, bankInp),
-      el("td", {}, tabInp),
+      el("td", { textContent: money(r.cash_on_hand) }),
+      el("td", { textContent: money(r.bank_transfer) }),
+      el("td", { textContent: money(r.tab_square) }),
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
       el("td", { textContent: money(cashDiffCash(r)) }),
       el("td", { textContent: money(cashDiffLS(r)) }),
-      el("td", {}, cashStatusBadge(r)),
-      el("td", {}, el("button", { className: "btn ghost small", textContent: "Save", onclick: async () => {
-        const { error } = await sb.rpc("cash_manager_update", {
-          p_id: r.id,
-          p_cash: inp.value === "" ? null : Number(inp.value),
-          p_bank: bankInp.value === "" ? null : Number(bankInp.value),
-          p_tab: tabInp.value === "" ? null : Number(tabInp.value)
-        });
-        m.textContent = error ? "!" : "✓"; m.className = "msg " + (error ? "err" : "ok");
-        loadCashManager(card);
-      }}), m)
+      el("td", {}, cashStatusBadge(r))
     ]));
   });
   table.append(tb);
@@ -2184,7 +2170,6 @@ async function loadHalalList(card, flt = {}) {
 /* ===================== ALLERGEN MATRIX ===================== */
 async function renderAllergen(view) {
   view.innerHTML = "";
-  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
 
   const intro = el("div", { className: "card" });
   intro.append(el("h2", { textContent: "Allergen Matrix" }));
@@ -2198,12 +2183,9 @@ async function renderAllergen(view) {
     card.append(el("h2", { textContent: "Upload allergen matrix" }));
     const b = el("div", { className: "body" });
     const grid = el("div", { className: "formgrid" });
-    const siteSel = el("select");
-    siteSel.append(el("option", { value: "", textContent: "— site —" }));
-    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
     const titleI = el("input", { type: "text" });
     const fileI = el("input", { type: "file", accept: "image/*", multiple: true });
-    grid.append(fieldWrap("Site", siteSel), fieldWrap("Title", titleI), fieldWrap("Image(s)", fileI));
+    grid.append(fieldWrap("Title", titleI), fieldWrap("Image(s)", fileI));
     b.append(grid);
     const msg = el("span", { className: "msg" });
     const save = el("button", { className: "btn", textContent: "Upload" });
@@ -2211,45 +2193,35 @@ async function renderAllergen(view) {
     card.append(b); view.append(card);
 
     save.onclick = async () => {
-      const site_id = Number(siteSel.value);
       const files = Array.from(fileI.files || []);
-      if (!site_id || !files.length) { msg.textContent = "Choose a site and at least one image."; msg.className = "msg err"; return; }
+      if (!files.length) { msg.textContent = "Choose at least one image."; msg.className = "msg err"; return; }
       save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
-        const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+        const path = "all/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
         const { error: upErr } = await sb.storage.from("allergen").upload(path, f);
         if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
-        const { error } = await sb.from("allergen").insert([{ site_id, title: titleI.value || f.name, file_path: path }]);
+        const { error } = await sb.from("allergen").insert([{ title: titleI.value || f.name, file_path: path }]);
         if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
       }
       save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
       titleI.value = ""; fileI.value = "";
-      loadAllergenList(listCard, { site: siteSel.value });
+      loadAllergenList(listCard);
     };
   }
 
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Allergen matrices" }));
   const lb = el("div", { className: "body" });
-  const filters = el("div", { className: "filters" });
-  const fSite = el("select");
-  fSite.append(el("option", { value: "", textContent: "All sites" }));
-  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
-  filters.append(fieldWrap("Site", fSite),
-    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadAllergenList(listCard, { site: fSite.value }) }));
-  lb.append(filters);
   const wrap = el("div"); lb.append(wrap);
   listCard.append(lb); view.append(listCard);
   loadAllergenList(listCard);
 }
 
-async function loadAllergenList(card, flt = {}) {
+async function loadAllergenList(card) {
   const wrap = card.querySelector(".body > div:last-child");
   wrap.innerHTML = "<div class='empty'>Loading…</div>";
-  let q = sb.from("allergen").select("*").order("created_at", { ascending: false }).limit(500);
-  if (flt.site) q = q.eq("site_id", flt.site);
-  const { data, error } = await q;
+  const { data, error } = await sb.from("allergen").select("*").order("created_at", { ascending: false }).limit(500);
   if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { wrap.innerHTML = "<div class='empty'>No allergen matrix uploaded yet.</div>"; return; }
@@ -2259,15 +2231,14 @@ async function loadAllergenList(card, flt = {}) {
     const block = el("div", { style: "margin:0 0 22px;padding-bottom:16px;border-bottom:1px solid #eee" });
     const headRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px" });
     headRow.append(el("div", {}, [
-      el("strong", { textContent: r.title || "Allergen matrix" }),
-      el("span", { style: "color:#777;margin-left:8px;font-size:13px", textContent: allSiteName(r.site_id) })
+      el("strong", { textContent: r.title || "Allergen matrix" })
     ]));
     const actions = el("div", {}, [ el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Open full size" }) ]);
     if (IS_ADMIN) actions.append(el("button", { className: "btn ghost small", textContent: "Delete", style: "margin-left:6px", onclick: async () => {
       if (!confirm("Delete this allergen matrix?")) return;
       await sb.storage.from("allergen").remove([r.file_path]);
       await sb.from("allergen").delete().eq("id", r.id);
-      loadAllergenList(card, flt);
+      loadAllergenList(card);
     }}));
     headRow.append(actions);
     block.append(headRow);
