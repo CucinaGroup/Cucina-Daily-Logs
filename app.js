@@ -281,7 +281,8 @@ async function boot() {
       { id: "leverage", label: "Leverage Form" },
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" },
-      { id: "halal", label: "Halal Certificate" }
+      { id: "halal", label: "Halal Certificate" },
+      { id: "allergen", label: "Allergen Matrix" }
     ]},
     { header: null, show: !IS_FINANCE, items: [{ id: "complaints", label: "Complaints / Suggestions Box" }] },
     { header: "Manager Portal", show: mgr || IS_FINANCE, items: [
@@ -338,6 +339,7 @@ function openTab(id) {
   if (id === "pestcon") return renderPestcon(view);
   if (id === "msds") return renderMSDS(view);
   if (id === "halal") return renderHalal(view);
+  if (id === "allergen") return renderAllergen(view);
   if (id === "cash") return renderCashSales(view);
   if (id === "complaints") return renderComplaints(view);
   if (id === "employees") return renderEmployees(view);
@@ -1050,10 +1052,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
- { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
-  { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
-  { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
-  { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
+  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
+  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
+  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
 ];
 
 async function renderLeave(view) {
@@ -1592,7 +1594,10 @@ async function renderCashManager(view) {
   const recordedBy = empSelect();
   const tillBy = empSelect();
   const cashI = el("input", { type: "number", step: "0.01" });
-  grid.append(fieldWrap("Date", dateI), fieldWrap("Recorded by", recordedBy), fieldWrap("Till Closed By", tillBy), fieldWrap("Cash Sales (On Hand) ($)", cashI));
+  const bankI = el("input", { type: "number", step: "0.01" });
+  const tabI = el("input", { type: "number", step: "0.01" });
+  grid.append(fieldWrap("Date", dateI), fieldWrap("Recorded by", recordedBy), fieldWrap("Till Closed By", tillBy),
+    fieldWrap("Cash Sales (On Hand) ($)", cashI), fieldWrap("Bank Transfer ($)", bankI), fieldWrap("Tab Square ($)", tabI));
   b.append(grid);
   const msg = el("span", { className: "msg" });
   const save = el("button", { className: "btn", textContent: "Save entry" });
@@ -1606,10 +1611,15 @@ async function renderCashManager(view) {
     if (!tillBy.value) { msg.textContent = "Choose Till Closed By."; msg.className = "msg err"; return; }
     if (cashI.value === "") { msg.textContent = "Enter the cash on hand."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const { error } = await sb.rpc("cash_manager_insert", { p_date: dateI.value, p_recorded_by: recordedBy.value || null, p_till: tillBy.value || null, p_cash: Number(cashI.value) });
+    const { error } = await sb.rpc("cash_manager_insert", {
+      p_date: dateI.value, p_recorded_by: recordedBy.value || null, p_till: tillBy.value || null,
+      p_cash: Number(cashI.value),
+      p_bank: bankI.value === "" ? null : Number(bankI.value),
+      p_tab: tabI.value === "" ? null : Number(tabI.value)
+    });
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
-    msg.textContent = "Saved ✓"; msg.className = "msg ok"; cashI.value = "";
+    msg.textContent = "Saved ✓"; msg.className = "msg ok"; cashI.value = ""; bankI.value = ""; tabI.value = "";
     loadCashManager(listCard);
   };
 
@@ -1628,22 +1638,31 @@ async function loadCashManager(card) {
   const rows = data || [];
   if (!rows.length) { tw.innerHTML = "<div class='empty'>No entries yet.</div>"; return; }
   const table = el("table");
-  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Save"].map(h => el("th", { textContent: h })))));
+  table.append(el("thead", {}, el("tr", {}, ["Date","Recorded by","Till Closed By","Cash (On Hand) ($)","Bank Transfer ($)","Tab Square ($)","Actual (Lightspeed) ($)","Difference cash ($)","Difference (Lightspeed) ($)","Status","Save"].map(h => el("th", { textContent: h })))));
   const tb = el("tbody");
   rows.forEach(r => {
-    const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:110px" });
+    const inp = el("input", { type: "number", step: "0.01", value: r.cash_on_hand != null ? r.cash_on_hand : "", style: "width:100px" });
+    const bankInp = el("input", { type: "number", step: "0.01", value: r.bank_transfer != null ? r.bank_transfer : "", style: "width:100px" });
+    const tabInp = el("input", { type: "number", step: "0.01", value: r.tab_square != null ? r.tab_square : "", style: "width:100px" });
     const m = el("span", { className: "msg" });
     tb.append(el("tr", {}, [
       el("td", { textContent: r.entry_date || "" }),
       el("td", { textContent: r.closed_by || "" }),
       el("td", { textContent: r.till_closed_by || "" }),
       el("td", {}, inp),
+      el("td", {}, bankInp),
+      el("td", {}, tabInp),
       el("td", { textContent: money(r.actual_cash_lightspeed) }),
       el("td", { textContent: money(cashDiffCash(r)) }),
       el("td", { textContent: money(cashDiffLS(r)) }),
       el("td", {}, cashStatusBadge(r)),
       el("td", {}, el("button", { className: "btn ghost small", textContent: "Save", onclick: async () => {
-        const { error } = await sb.rpc("cash_manager_set_onhand", { p_id: r.id, p_cash: inp.value === "" ? null : Number(inp.value) });
+        const { error } = await sb.rpc("cash_manager_update", {
+          p_id: r.id,
+          p_cash: inp.value === "" ? null : Number(inp.value),
+          p_bank: bankInp.value === "" ? null : Number(bankInp.value),
+          p_tab: tabInp.value === "" ? null : Number(tabInp.value)
+        });
         m.textContent = error ? "!" : "✓"; m.className = "msg " + (error ? "err" : "ok");
         loadCashManager(card);
       }}), m)
@@ -2160,4 +2179,99 @@ async function loadHalalList(card, flt = {}) {
   });
   table.append(tb);
   tw.innerHTML = ""; tw.append(table);
+}
+
+/* ===================== ALLERGEN MATRIX ===================== */
+async function renderAllergen(view) {
+  view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+
+  const intro = el("div", { className: "card" });
+  intro.append(el("h2", { textContent: "Allergen Matrix" }));
+  const ib = el("div", { className: "body" });
+  ib.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "An allergen matrix sets out which of the common allergens — for example milk, eggs, peanuts, tree nuts, soy, wheat/gluten, fish, crustaceans and sesame — are present in each menu item." }));
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "It allows staff to answer customer allergen enquiries quickly and accurately and helps each venue meet its food-allergen information obligations. Select a site below to view its current allergen matrix." }));
+  intro.append(ib); view.append(intro);
+
+  if (IS_ADMIN) {
+    const card = el("div", { className: "card" });
+    card.append(el("h2", { textContent: "Upload allergen matrix" }));
+    const b = el("div", { className: "body" });
+    const grid = el("div", { className: "formgrid" });
+    const siteSel = el("select");
+    siteSel.append(el("option", { value: "", textContent: "— site —" }));
+    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    const titleI = el("input", { type: "text" });
+    const fileI = el("input", { type: "file", accept: "image/*", multiple: true });
+    grid.append(fieldWrap("Site", siteSel), fieldWrap("Title", titleI), fieldWrap("Image(s)", fileI));
+    b.append(grid);
+    const msg = el("span", { className: "msg" });
+    const save = el("button", { className: "btn", textContent: "Upload" });
+    b.append(el("div", { className: "actions" }, [save, msg]));
+    card.append(b); view.append(card);
+
+    save.onclick = async () => {
+      const site_id = Number(siteSel.value);
+      const files = Array.from(fileI.files || []);
+      if (!site_id || !files.length) { msg.textContent = "Choose a site and at least one image."; msg.className = "msg err"; return; }
+      save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+        const { error: upErr } = await sb.storage.from("allergen").upload(path, f);
+        if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
+        const { error } = await sb.from("allergen").insert([{ site_id, title: titleI.value || f.name, file_path: path }]);
+        if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
+      }
+      save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
+      titleI.value = ""; fileI.value = "";
+      loadAllergenList(listCard, { site: siteSel.value });
+    };
+  }
+
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Allergen matrices" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  filters.append(fieldWrap("Site", fSite),
+    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadAllergenList(listCard, { site: fSite.value }) }));
+  lb.append(filters);
+  const wrap = el("div"); lb.append(wrap);
+  listCard.append(lb); view.append(listCard);
+  loadAllergenList(listCard);
+}
+
+async function loadAllergenList(card, flt = {}) {
+  const wrap = card.querySelector(".body > div:last-child");
+  wrap.innerHTML = "<div class='empty'>Loading…</div>";
+  let q = sb.from("allergen").select("*").order("created_at", { ascending: false }).limit(500);
+  if (flt.site) q = q.eq("site_id", flt.site);
+  const { data, error } = await q;
+  if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { wrap.innerHTML = "<div class='empty'>No allergen matrix uploaded yet.</div>"; return; }
+  wrap.innerHTML = "";
+  rows.forEach(r => {
+    const url = sb.storage.from("allergen").getPublicUrl(r.file_path).data.publicUrl;
+    const block = el("div", { style: "margin:0 0 22px;padding-bottom:16px;border-bottom:1px solid #eee" });
+    const headRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px" });
+    headRow.append(el("div", {}, [
+      el("strong", { textContent: r.title || "Allergen matrix" }),
+      el("span", { style: "color:#777;margin-left:8px;font-size:13px", textContent: allSiteName(r.site_id) })
+    ]));
+    const actions = el("div", {}, [ el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Open full size" }) ]);
+    if (IS_ADMIN) actions.append(el("button", { className: "btn ghost small", textContent: "Delete", style: "margin-left:6px", onclick: async () => {
+      if (!confirm("Delete this allergen matrix?")) return;
+      await sb.storage.from("allergen").remove([r.file_path]);
+      await sb.from("allergen").delete().eq("id", r.id);
+      loadAllergenList(card, flt);
+    }}));
+    headRow.append(actions);
+    block.append(headRow);
+    block.append(el("img", { src: url, alt: r.title || "Allergen matrix", style: "max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px" }));
+    wrap.append(block);
+  });
 }
