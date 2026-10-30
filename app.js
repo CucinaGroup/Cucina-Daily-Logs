@@ -117,7 +117,7 @@ const LOGS = {
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
-      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS, topOption: "NO WASTAGE TODAY", allowOther: true, otherLabel: "Other item — specify" },
+      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS, topOption: "NO WASTAGE TODAY", lockOnTop: ["loss_reason","quantity","unit","cost","verified_by"], allowOther: true, otherLabel: "Other item — specify" },
       { key: "loss_reason", label: "Loss reason", ...SEL("Closing","Leftover","Spoiled") },
       { key: "quantity", label: "Quantity", type: "number" },
       { key: "unit", label: "Unit", ...SEL("kg","L","ea") },
@@ -416,6 +416,18 @@ function renderLog(id, view) {
       input = el("input", { type: f.type });
     }
     inputs[f.key] = input; if (input.disabled) lockedKeys.add(f.key); wrap.append(input); grid.append(wrap);
+    if (f.type === "select" && f.topOption && f.lockOnTop) {
+      const applyLock = () => {
+        const lock = input.value === f.topOption;
+        f.lockOnTop.forEach(k => {
+          if (!inputs[k]) return;
+          if (lock) { inputs[k].value = ""; inputs[k].disabled = true; }
+          else { inputs[k].disabled = lockedKeys.has(k); }
+        });
+      };
+      input.addEventListener("change", applyLock);
+      input._applyLock = applyLock;   // re-run after resetForm
+    }
     if (f.type === "select" && f.allowOther) {
       const ow = el("div", { className: "field", style: "display:none" });
       ow.append(el("label", { textContent: f.otherLabel || "Specify item" }));
