@@ -117,7 +117,7 @@ const LOGS = {
       { key: "entry_time", label: "Time", type: "time" },
       { key: "site_id", label: "Site", type: "site", req: true },
       { key: "recorded_by", label: "Recorded by", type: "employee" },
-      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS, allowOther: true, otherLabel: "Other item — specify" },
+      { key: "item_description", label: "Item description", type: "select", options: PROCESS_ITEMS, topOption: "NO WASTAGE TODAY", allowOther: true, otherLabel: "Other item — specify" },
       { key: "loss_reason", label: "Loss reason", ...SEL("Closing","Leftover","Spoiled") },
       { key: "quantity", label: "Quantity", type: "number" },
       { key: "unit", label: "Unit", ...SEL("kg","L","ea") },
@@ -385,6 +385,7 @@ function renderLog(id, view) {
     let input;
     if (f.type === "select") {
       input = el("select"); input.append(el("option", { value: "", textContent: "—" }));
+      if (f.topOption) input.append(el("option", { value: f.topOption, textContent: f.topOption }));
       f.options.forEach(o => { const v = (o && typeof o === "object") ? o.value : o; const t = (o && typeof o === "object") ? o.label : o; input.append(el("option", { value: v, textContent: t })); });
       if (f.allowOther) input.append(el("option", { value: "__other__", textContent: "Others" }));
       if (f.default) input.value = f.default;
