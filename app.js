@@ -933,7 +933,8 @@ async function renderOrder(view) {
     submit.disabled = true; omsg.textContent = "Submitting…"; omsg.className = "msg";
     const { data: ord, error } = await sb.from("orders").insert([{ site_id: orderSite }]).select().single();
     if (error) { submit.disabled = false; omsg.textContent = error.message; omsg.className = "msg err"; return; }
-    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, merchant_code: i.merchant_code || null, supplier: i.supplier || null, unit_price: Number(i.price), quantity: qty[i.id] }));
+    const catName = id => (cats || []).find(c => c.id === id) ? (cats.find(c => c.id === id).name) : null;
+    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, merchant_code: i.merchant_code || null, supplier: i.supplier || null, category: catName(i.category_id), unit_price: Number(i.price), quantity: qty[i.id] }));
     const { error: lerr } = await sb.from("order_lines").insert(payload);
     submit.disabled = false;
     if (lerr) { omsg.textContent = lerr.message; omsg.className = "msg err"; return; }
@@ -963,17 +964,18 @@ async function renderOrderHistory(view) {
   card.append(b); view.append(card);
   let lastOrders = [];
 
-  // Group an order's lines by vendor (supplier), vendors A→Z, items A→Z within each.
+  // Group an order's lines by category (e.g. "Hospitality Items - Lumas"),
+  // categories A→Z, items A→Z within each.
   function groupByVendor(lines) {
     const map = {};
-    (lines || []).forEach(l => { const v = l.supplier || "(Unassigned)"; (map[v] = map[v] || []).push(l); });
+    (lines || []).forEach(l => { const v = l.category || l.supplier || "(Uncategorised)"; (map[v] = map[v] || []).push(l); });
     return Object.keys(map).sort((a, b) => a.localeCompare(b))
       .map(v => ({ vendor: v, items: map[v].sort((x, y) => String(x.item_name || "").localeCompare(String(y.item_name || ""))) }));
   }
 
   function ordersCSV() {
     if (!lastOrders.length) return;
-    const head = ["Order ID","Date","Site","Status","Delivered","Vendor","Merchant code","Item","Qty","Unit price","Line total"];
+    const head = ["Order ID","Date","Site","Status","Delivered","Category","Merchant code","Item","Qty","Unit price","Line total"];
     const rows = [];
     lastOrders.forEach(o => {
       const d = new Date(o.created_at).toLocaleString();
@@ -990,7 +992,7 @@ async function renderOrderHistory(view) {
 
   async function load() {
     wrap.innerHTML = "<div class='empty'>Loading…</div>";
-    let q = sb.from("orders").select("*, order_lines(id,quantity,unit_price,item_name,merchant_code,supplier)").order("created_at", { ascending: false }).limit(200);
+    let q = sb.from("orders").select("*, order_lines(id,quantity,unit_price,item_name,merchant_code,supplier,category)").order("created_at", { ascending: false }).limit(200);
     if (siteSel && siteSel.value) q = q.eq("site_id", siteSel.value);
     const { data, error } = await q;
     if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
