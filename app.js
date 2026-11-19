@@ -1093,10 +1093,10 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
-   { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
-  { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
-  { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
-  { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
+  { label: "Company 1 — Flappy's Fried Chicken", url: "REPLACE_WITH_LINK" },
+  { label: "Company 2 — Burger Point",           url: "REPLACE_WITH_LINK" },
+  { label: "Company 3 — Sir Manong",             url: "REPLACE_WITH_LINK" },
+  { label: "Company 4 — Masa",                   url: "REPLACE_WITH_LINK" }
 ];
 
 async function renderLeave(view) {
@@ -2293,6 +2293,7 @@ function pctColor(p) { return p == null ? "#777" : p <= 35 ? "#1a7f37" : p <= 45
 
 let COST_ING = [];        // ingredient price list
 let COST_PRICE = {};      // lowercased name -> price
+const COST_BRANDS = ["Flappy's Fried Chicken", "Burger Point", "Sir Manong", "Masa"];
 
 async function renderCosting(view) {
   view.innerHTML = "";
@@ -2383,8 +2384,10 @@ async function renderCosting(view) {
   addCard.append(el("h2", { textContent: "Add a dish" }));
   const ab = el("div", { className: "body" });
   const ag = el("div", { className: "formgrid" });
-  const aItem = el("input", { type: "text" }), aBrand = el("input", { type: "text" }), aPrice = el("input", { type: "number", step: "0.01" });
-  ag.append(fieldWrap("Dish", aItem), fieldWrap("Brand", aBrand), fieldWrap("Selling price $", aPrice));
+  const aItem = el("input", { type: "text" });
+  const aBrand = el("select"); COST_BRANDS.forEach(bn => aBrand.append(el("option", { value: bn, textContent: bn })));
+  const aPct = el("input", { type: "number", step: "0.1", value: "30" });
+  ag.append(fieldWrap("Dish", aItem), fieldWrap("Brand", aBrand), fieldWrap("Target food cost %", aPct));
   ab.append(ag);
   const amsg = el("span", { className: "msg" });
   const addBtn = el("button", { className: "btn", textContent: "Add dish" });
@@ -2392,9 +2395,9 @@ async function renderCosting(view) {
   addCard.append(ab); view.append(addCard);
   addBtn.onclick = async () => {
     if (!aItem.value.trim()) { amsg.textContent = "Dish name is required."; amsg.className = "msg err"; return; }
-    const { error } = await sb.from("costing_dishes").insert([{ item: aItem.value.trim(), brand: aBrand.value.trim() || null, selling_price: aPrice.value === "" ? null : Number(aPrice.value) }]);
+    const { error } = await sb.from("costing_dishes").insert([{ item: aItem.value.trim(), brand: aBrand.value, target_pct: aPct.value === "" ? null : Number(aPct.value) }]);
     if (error) { amsg.textContent = error.message; amsg.className = "msg err"; return; }
-    amsg.textContent = "Added ✓"; amsg.className = "msg ok"; aItem.value = ""; aBrand.value = ""; aPrice.value = ""; loadDishes();
+    amsg.textContent = "Added ✓"; amsg.className = "msg ok"; aItem.value = ""; aPct.value = "30"; loadDishes();
   };
 
   const dishCard = el("div", { className: "card" });
@@ -2416,61 +2419,76 @@ async function renderCosting(view) {
   }
   const lineCost = l => { const p = COST_PRICE[(l.ingredient_name || "").toLowerCase()]; return (p != null && l.quantity != null) ? Number(p) * Number(l.quantity) : null; };
 
+  function dishBlock(d) {
+    const lines = d.costing_dish_lines || [];
+    const cost = lines.reduce((a, l) => a + (lineCost(l) || 0), 0);
+    const pct = d.target_pct;                                    // target food cost %
+    const price = (pct != null && Number(pct) > 0) ? cost / (Number(pct) / 100) : null;  // recommended selling price
+    const det = el("details", { className: "order-row" });
+    const sum = el("summary");
+    sum.append(el("span", { textContent: d.item }));
+    sum.append(el("span", { className: "ord-total", textContent: "Cost $" + cost.toFixed(2) }));
+    sum.append(el("span", { style: "margin-left:10px;font-weight:700;color:" + pctColor(pct), textContent: pct == null ? "—" : Number(pct).toFixed(1) + "%" }));
+    sum.append(el("span", { style: "margin-left:10px;color:#141414", textContent: price == null ? "" : "Price $" + price.toFixed(2) }));
+    det.append(sum);
+
+    const tbl = el("table");
+    tbl.append(el("thead", {}, el("tr", {}, ["Ingredient", "Qty", "Unit price $", "Line $", ""].map(h => el("th", { textContent: h })))));
+    const tb = el("tbody");
+    lines.forEach(l => {
+      const up = COST_PRICE[(l.ingredient_name || "").toLowerCase()];
+      tb.append(el("tr", {}, [
+        el("td", { textContent: l.ingredient_name }),
+        el("td", { textContent: String(l.quantity) }),
+        el("td", { textContent: up != null ? "$" + Number(up).toFixed(2) : "—" }),
+        el("td", { textContent: lineCost(l) != null ? "$" + lineCost(l).toFixed(2) : "—" }),
+        el("td", {}, el("button", { className: "btn ghost small", textContent: "✕", onclick: async () => { await sb.from("costing_dish_lines").delete().eq("id", l.id); loadDishes(); } }))
+      ]));
+    });
+    tbl.append(tb); det.append(tbl);
+
+    // add ingredient line
+    const ingIn = el("input", { type: "text", placeholder: "Search ingredient…", list: "ing-datalist", style: "width:200px" });
+    const qIn = el("input", { type: "number", step: "0.0001", placeholder: "Qty", style: "width:90px" });
+    const lmsg = el("span", { className: "msg" });
+    const addLine = el("button", { className: "btn ghost small", textContent: "Add ingredient", onclick: async () => {
+      const nm = ingIn.value.trim(); if (!nm) { lmsg.textContent = "Pick an ingredient."; lmsg.className = "msg err"; return; }
+      if (!(nm.toLowerCase() in COST_PRICE)) { lmsg.textContent = "Not on the ingredient list."; lmsg.className = "msg err"; return; }
+      const { error } = await sb.from("costing_dish_lines").insert([{ dish_id: d.id, ingredient_name: nm, quantity: qIn.value === "" ? null : Number(qIn.value) }]);
+      if (error) { lmsg.textContent = error.message; lmsg.className = "msg err"; return; }
+      loadDishes();
+    }});
+    det.append(el("div", { className: "actions", style: "margin-top:8px" }, [ingIn, qIn, addLine, lmsg]));
+
+    // target % drives the recommended selling price
+    const pctI = el("input", { type: "number", step: "0.1", value: pct != null ? pct : "", style: "width:90px" });
+    pctI.onchange = async () => { await sb.from("costing_dishes").update({ target_pct: pctI.value === "" ? null : Number(pctI.value) }).eq("id", d.id); loadDishes(); };
+    det.append(el("div", { className: "actions", style: "margin-top:8px" }, [
+      fieldWrap("Target food cost %", pctI),
+      el("span", { style: "align-self:center;color:#141414;font-weight:600", textContent: price == null ? "Set a % to get the selling price" : ("Recommended selling price: $" + price.toFixed(2) + "   ·   GP " + (100 - Number(pct)).toFixed(1) + "%") }),
+      el("button", { className: "btn ghost small", textContent: "Delete dish", onclick: async () => { if (!confirm("Delete " + d.item + "?")) return; await sb.from("costing_dishes").delete().eq("id", d.id); loadDishes(); } })
+    ]));
+    return det;
+  }
+
   async function loadDishes() {
     dwrap.innerHTML = "<div class='empty'>Loading…</div>";
-    const { data, error } = await sb.from("costing_dishes").select("*, costing_dish_lines(*)").order("brand").order("item");
+    const { data, error } = await sb.from("costing_dishes").select("*, costing_dish_lines(*)").order("item");
     if (error) { dwrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
     const dishes = data || [];
     if (!dishes.length) { dwrap.innerHTML = "<div class='empty'>No dishes yet — add one above.</div>"; return; }
+    // group & sort by brand (brands in their set order, then any others A→Z)
+    const groups = {};
+    dishes.forEach(d => { const bn = d.brand || "(No brand)"; (groups[bn] = groups[bn] || []).push(d); });
+    const order = Object.keys(groups).sort((a, b) => {
+      const ia = COST_BRANDS.indexOf(a), ib = COST_BRANDS.indexOf(b);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      return a.localeCompare(b);
+    });
     dwrap.innerHTML = "";
-    dishes.forEach(d => {
-      const lines = d.costing_dish_lines || [];
-      const cost = lines.reduce((a, l) => a + (lineCost(l) || 0), 0);
-      const pct = foodPct(cost, d.selling_price);
-      const det = el("details", { className: "order-row" });
-      const sum = el("summary");
-      sum.append(el("span", { textContent: d.item + (d.brand ? " · " + d.brand : "") }));
-      sum.append(el("span", { className: "ord-total", textContent: "Cost $" + cost.toFixed(2) }));
-      sum.append(el("span", { style: "margin-left:10px;font-weight:700;color:" + pctColor(pct), textContent: pct == null ? "—" : pct.toFixed(1) + "%" }));
-      det.append(sum);
-
-      const tbl = el("table");
-      tbl.append(el("thead", {}, el("tr", {}, ["Ingredient", "Qty", "Unit price $", "Line $", ""].map(h => el("th", { textContent: h })))));
-      const tb = el("tbody");
-      lines.forEach(l => {
-        const up = COST_PRICE[(l.ingredient_name || "").toLowerCase()];
-        tb.append(el("tr", {}, [
-          el("td", { textContent: l.ingredient_name }),
-          el("td", { textContent: String(l.quantity) }),
-          el("td", { textContent: up != null ? "$" + Number(up).toFixed(2) : "—" }),
-          el("td", { textContent: lineCost(l) != null ? "$" + lineCost(l).toFixed(2) : "—" }),
-          el("td", {}, el("button", { className: "btn ghost small", textContent: "✕", onclick: async () => { await sb.from("costing_dish_lines").delete().eq("id", l.id); loadDishes(); } }))
-        ]));
-      });
-      tbl.append(tb); det.append(tbl);
-
-      // add line row
-      const ingIn = el("input", { type: "text", placeholder: "Search ingredient…", list: "ing-datalist", style: "width:200px" });
-      const qIn = el("input", { type: "number", step: "0.0001", placeholder: "Qty", style: "width:90px" });
-      const lmsg = el("span", { className: "msg" });
-      const addLine = el("button", { className: "btn ghost small", textContent: "Add ingredient", onclick: async () => {
-        const nm = ingIn.value.trim(); if (!nm) { lmsg.textContent = "Pick an ingredient."; lmsg.className = "msg err"; return; }
-        if (!(nm.toLowerCase() in COST_PRICE)) { lmsg.textContent = "Not on the ingredient list."; lmsg.className = "msg err"; return; }
-        const { error } = await sb.from("costing_dish_lines").insert([{ dish_id: d.id, ingredient_name: nm, quantity: qIn.value === "" ? null : Number(qIn.value) }]);
-        if (error) { lmsg.textContent = error.message; lmsg.className = "msg err"; return; }
-        loadDishes();
-      }});
-      det.append(el("div", { className: "actions", style: "margin-top:8px" }, [ingIn, qIn, addLine, lmsg]));
-
-      // selling price + delete dish
-      const spI = el("input", { type: "number", step: "0.01", value: d.selling_price != null ? d.selling_price : "", style: "width:100px" });
-      spI.onchange = async () => { await sb.from("costing_dishes").update({ selling_price: spI.value === "" ? null : Number(spI.value) }).eq("id", d.id); loadDishes(); };
-      det.append(el("div", { className: "actions", style: "margin-top:8px" }, [
-        fieldWrap("Selling price $", spI),
-        el("span", { style: "align-self:center;color:#555", textContent: "GP: " + (pct == null ? "—" : (100 - pct).toFixed(1) + "%") }),
-        el("button", { className: "btn ghost small", textContent: "Delete dish", onclick: async () => { if (!confirm("Delete " + d.item + "?")) return; await sb.from("costing_dishes").delete().eq("id", d.id); loadDishes(); } })
-      ]));
-      dwrap.append(det);
+    order.forEach(bn => {
+      dwrap.append(el("div", { className: "cat-group", style: "margin-top:14px;font-weight:700", textContent: bn }));
+      groups[bn].forEach(d => dwrap.append(dishBlock(d)));
     });
   }
 
