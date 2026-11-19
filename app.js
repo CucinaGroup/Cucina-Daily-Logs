@@ -668,12 +668,14 @@ async function renderCatalogue(view) {
   cats.forEach(c => catSel.append(el("option", { value: c.id, textContent: c.name })));
   const nameI = el("input", { type: "text" });
   const codeI = el("input", { type: "text" });
+  const supplierI = el("input", { type: "text" });
   const priceI = el("input", { type: "number", step: "0.01", min: "0" });
   const photoI = el("input", { type: "file", accept: "image/*" });
   const descI = el("textarea");
   grid.append(
     fieldWrap("Category", catSel),
     fieldWrap("Item name", nameI),
+    fieldWrap("Supplier", supplierI),
     fieldWrap("Merchant code", codeI),
     fieldWrap("Price $", priceI),
     fieldWrap("Photo", photoI),
@@ -721,13 +723,13 @@ async function renderCatalogue(view) {
       photo_url = sb.storage.from("item-photos").getPublicUrl(path).data.publicUrl;
     }
     const { error } = await sb.from("catalogue_items").insert([{
-      category_id: Number(catSel.value), name, merchant_code: codeI.value || null,
+      category_id: Number(catSel.value), name, merchant_code: codeI.value || null, supplier: supplierI.value || null,
       description: descI.value || null, price: Number(priceI.value || 0), photo_url
     }]);
     save.disabled = false;
     if (error) { msg.textContent = error.message; msg.className = "msg err"; return; }
     msg.textContent = "Added ✓"; msg.className = "msg ok";
-    nameI.value = ""; codeI.value = ""; priceI.value = ""; descI.value = ""; photoI.value = "";
+    nameI.value = ""; codeI.value = ""; supplierI.value = ""; priceI.value = ""; descI.value = ""; photoI.value = "";
     renderCatalogueList(listCard);
   };
 }
@@ -762,6 +764,7 @@ function itemCard(i, cats, card) {
     ? el("img", { src: i.photo_url, alt: i.name, className: "item-thumb" })
     : el("div", { className: "item-thumb noimg", textContent: "No photo" }));
   ci.append(el("div", { className: "item-name", textContent: i.name }));
+  if (i.supplier) ci.append(el("div", { className: "item-code", textContent: "Supplier: " + i.supplier }));
   if (i.merchant_code) ci.append(el("div", { className: "item-code", textContent: "Code: " + i.merchant_code }));
   if (i.description) ci.append(el("div", { className: "item-desc", textContent: i.description }));
   ci.append(el("div", { className: "item-price", textContent: "$" + Number(i.price).toFixed(2) }));
@@ -782,12 +785,14 @@ function itemEditCard(i, cats, card) {
   cats.forEach(c => { const o = el("option", { value: c.id, textContent: c.name }); if (c.id === i.category_id) o.selected = true; catSel.append(o); });
   const nameI = el("input", { type: "text", value: i.name });
   const codeI = el("input", { type: "text", value: i.merchant_code || "" });
+  const supplierI = el("input", { type: "text", value: i.supplier || "" });
   const priceI = el("input", { type: "number", step: "0.01", min: "0", value: i.price != null ? String(i.price) : "" });
   const photoI = el("input", { type: "file", accept: "image/*" });
   const descI = el("textarea"); descI.value = i.description || "";
   ci.append(
     fieldWrap("Category", catSel),
     fieldWrap("Item name", nameI),
+    fieldWrap("Supplier", supplierI),
     fieldWrap("Merchant code", codeI),
     fieldWrap("Price $", priceI),
     fieldWrap("Replace photo", photoI),
@@ -798,7 +803,7 @@ function itemEditCard(i, cats, card) {
     const name = nameI.value.trim();
     if (!name) { msg.textContent = "Name required."; msg.className = "msg err"; return; }
     save.disabled = true; msg.textContent = "Saving…"; msg.className = "msg";
-    const patch = { category_id: Number(catSel.value), name, merchant_code: codeI.value || null, description: descI.value || null, price: Number(priceI.value || 0) };
+    const patch = { category_id: Number(catSel.value), name, merchant_code: codeI.value || null, supplier: supplierI.value || null, description: descI.value || null, price: Number(priceI.value || 0) };
     const file = photoI.files[0];
     if (file) {
       const path = Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "");
