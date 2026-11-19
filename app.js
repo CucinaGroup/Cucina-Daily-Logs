@@ -282,7 +282,8 @@ async function boot() {
       { id: "pestcon", label: "Pest Control Document" },
       { id: "msds", label: "MSDS Document" },
       { id: "halal", label: "Halal Certificate" },
-      { id: "allergen", label: "Allergen Matrix" }
+      { id: "allergen", label: "Allergen Matrix" },
+      { id: "fire", label: "Fire Inspection" }
     ]},
     { header: null, show: !IS_FINANCE, items: [{ id: "complaints", label: "Complaints / Suggestions Box" }] },
     { header: "Manager Portal", show: mgr || IS_FINANCE, items: [
@@ -291,6 +292,9 @@ async function boot() {
     ]},
     { header: "Admin", show: IS_ADMIN || IS_FINANCE, items: [
       { id: "catalogue", label: "Catalogue" }
+    ]},
+    { header: "Finance", show: IS_ADMIN || IS_FINANCE, items: [
+      { id: "costing", label: "Food Costing" }
     ]}
   ];
   const visible = groups.filter(g => g.show === undefined || g.show);
@@ -340,6 +344,8 @@ function openTab(id) {
   if (id === "msds") return renderMSDS(view);
   if (id === "halal") return renderHalal(view);
   if (id === "allergen") return renderAllergen(view);
+  if (id === "fire") return renderFireInspection(view);
+  if (id === "costing") return renderCosting(view);
   if (id === "cash") return renderCashSales(view);
   if (id === "complaints") return renderComplaints(view);
   if (id === "employees") return renderEmployees(view);
@@ -2259,6 +2265,318 @@ async function loadAllergenList(card) {
     headRow.append(actions);
     block.append(headRow);
     block.append(el("img", { src: url, alt: r.title || "Allergen matrix", style: "max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px" }));
+    wrap.append(block);
+  });
+}
+
+/* ===================== FOOD COSTING (Finance + Admin) ===================== */
+function csvParse(text) {
+  const rows = []; let field = "", row = [], inQ = false, i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += c; i++; continue;
+    }
+    if (c === '"') { inQ = true; i++; continue; }
+    if (c === ',') { row.push(field); field = ""; i++; continue; }
+    if (c === '\r') { i++; continue; }
+    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+    field += c; i++;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ""));
+}
+const costNum = v => { const n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? null : n; };
+function foodPct(cost, price) { return (price && Number(price) > 0 && cost != null) ? (Number(cost) / Number(price)) * 100 : null; }
+function pctColor(p) { return p == null ? "#777" : p <= 35 ? "#1a7f37" : p <= 45 ? "#b26a00" : "#c0392b"; }
+
+let COST_ING = [];        // ingredient price list
+let COST_PRICE = {};      // lowercased name -> price
+
+async function renderCosting(view) {
+  view.innerHTML = "";
+  if (!IS_ADMIN && !IS_FINANCE) { view.append(el("div", { className: "card" }, el("div", { className: "body" }, el("div", { className: "empty", textContent: "Finance / Head Office only." })))); return; }
+
+  // ================= INGREDIENT PRICE LIST (CSV) =================
+  const ingCard = el("div", { className: "card" });
+  ingCard.append(el("h2", { textContent: "Ingredient price list" }));
+  const ib = el("div", { className: "body" });
+  ib.append(el("p", { style: "margin:0 0 10px;font-size:14px;line-height:1.5;color:#333", textContent: "Upload a CSV of ingredient prices (Ingredient, Unit, Price). Uploading updates the price of any ingredient already on the list (matched by name) and adds new ones — so every dish using an ingredient recalculates automatically when you re-upload. Tick “Locked” to keep an ingredient's price fixed; a CSV upload won't change a locked ingredient." }));
+  const ig = el("div", { className: "formgrid" });
+  const fileI = el("input", { type: "file", accept: ".csv,text/csv" });
+  ig.append(fieldWrap("CSV (Ingredient, Unit, Price)", fileI));
+  ib.append(ig);
+  const umsg = el("span", { className: "msg" });
+  const upBtn = el("button", { className: "btn", textContent: "Upload / update prices" });
+  const tplBtn = el("button", { className: "btn ghost", textContent: "Download template" });
+  ib.append(el("div", { className: "actions" }, [upBtn, tplBtn, umsg]));
+  const searchI = el("input", { type: "search", placeholder: "Search ingredient…", style: "width:100%;padding:9px;margin:10px 0 0;box-sizing:border-box" });
+  ib.append(searchI);
+  ib.append(el("div", { className: "tablewrap ing-wrap" }));
+  ingCard.append(ib); view.append(ingCard);
+
+  tplBtn.onclick = () => {
+    const csv = "Ingredient,Unit,Price\r\nChicken Thigh,kg,8.50\r\nBurger Bun,ea,0.40\r\n";
+    const a = el("a", { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: "ingredient_prices_template.csv" });
+    document.body.append(a); a.click(); a.remove();
+  };
+
+  upBtn.onclick = async () => {
+    const f = fileI.files && fileI.files[0];
+    if (!f) { umsg.textContent = "Choose a CSV file."; umsg.className = "msg err"; return; }
+    upBtn.disabled = true; umsg.textContent = "Reading…"; umsg.className = "msg";
+    let rows; try { rows = csvParse(await f.text()); } catch (e) { upBtn.disabled = false; umsg.textContent = "Could not read file."; umsg.className = "msg err"; return; }
+    if (rows.length < 2) { upBtn.disabled = false; umsg.textContent = "CSV has no data rows."; umsg.className = "msg err"; return; }
+    const head = rows[0].map(h => h.trim().toLowerCase());
+    const find = (...k) => head.findIndex(h => k.some(x => h.includes(x)));
+    const iName = find("ingredient", "item", "name"), iUnit = find("unit", "uom"), iPrice = find("price", "cost", "rate");
+    if (iName < 0 || iPrice < 0) { upBtn.disabled = false; umsg.textContent = "Need an Ingredient column and a Price column."; umsg.className = "msg err"; return; }
+    const seen = {}; const records = [];
+    rows.slice(1).forEach(r => {
+      const name = (r[iName] || "").trim(); if (!name) return;
+      const key = name.toLowerCase(); if (seen[key]) return; seen[key] = 1;
+      records.push({ name, unit: iUnit >= 0 ? (r[iUnit] || "").trim() || null : null, price: costNum(r[iPrice]) });
+    });
+    if (!records.length) { upBtn.disabled = false; umsg.textContent = "No valid rows."; umsg.className = "msg err"; return; }
+    // Locked ingredients keep their current price/unit — skip them on upload.
+    const lockedSet = new Set(COST_ING.filter(x => x.locked).map(x => (x.name || "").toLowerCase()));
+    const toSave = records.filter(r => !lockedSet.has(r.name.toLowerCase()));
+    const skipped = records.length - toSave.length;
+    if (!toSave.length) { upBtn.disabled = false; umsg.textContent = "Nothing updated — all matching ingredients are locked."; umsg.className = "msg err"; return; }
+    umsg.textContent = "Saving " + toSave.length + " ingredients…";
+    const { error } = await sb.from("costing_ingredients").upsert(toSave, { onConflict: "name" });
+    upBtn.disabled = false;
+    if (error) { umsg.textContent = error.message; umsg.className = "msg err"; return; }
+    umsg.textContent = "Updated ✓ (" + toSave.length + " ingredients" + (skipped ? ", " + skipped + " locked skipped" : "") + ")"; umsg.className = "msg ok";
+    fileI.value = ""; await loadIngredients(); drawIngredients(searchI.value); loadDishes();
+  };
+
+  function drawIngredients(term) {
+    const tw = ingCard.querySelector(".ing-wrap");
+    const t = (term || "").trim().toLowerCase();
+    const list = COST_ING.filter(x => !t || (x.name && x.name.toLowerCase().includes(t)));
+    if (!COST_ING.length) { tw.innerHTML = "<div class='empty'>No ingredients yet — upload a CSV.</div>"; return; }
+    if (!list.length) { tw.innerHTML = "<div class='empty'>No ingredient matches “" + term + "”.</div>"; return; }
+    const table = el("table");
+    table.append(el("thead", {}, el("tr", {}, ["Ingredient", "Unit", "Price $", "Locked", ""].map(h => el("th", { textContent: h })))));
+    const b = el("tbody");
+    list.forEach(x => {
+      const pI = el("input", { type: "number", step: "0.0001", value: x.price != null ? x.price : "", style: "width:100px" });
+      pI.onchange = async () => { const v = pI.value === "" ? null : Number(pI.value); await sb.from("costing_ingredients").update({ price: v }).eq("id", x.id); x.price = v; COST_PRICE[x.name.toLowerCase()] = v; loadDishes(); };
+      const lockBox = el("input", { type: "checkbox" }); lockBox.checked = !!x.locked;
+      lockBox.onchange = async () => { await sb.from("costing_ingredients").update({ locked: lockBox.checked }).eq("id", x.id); x.locked = lockBox.checked; };
+      b.append(el("tr", {}, [
+        el("td", { textContent: x.name }),
+        el("td", { textContent: x.unit || "" }),
+        el("td", {}, pI),
+        el("td", { style: "text-align:center" }, lockBox),
+        el("td", {}, el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => { if (!confirm("Delete " + x.name + "?")) return; await sb.from("costing_ingredients").delete().eq("id", x.id); await loadIngredients(); drawIngredients(searchI.value); loadDishes(); } }))
+      ]));
+    });
+    table.append(b); tw.innerHTML = ""; tw.append(table);
+  }
+  searchI.oninput = () => drawIngredients(searchI.value);
+
+  // ================= DISHES =================
+  const addCard = el("div", { className: "card" });
+  addCard.append(el("h2", { textContent: "Add a dish" }));
+  const ab = el("div", { className: "body" });
+  const ag = el("div", { className: "formgrid" });
+  const aItem = el("input", { type: "text" }), aBrand = el("input", { type: "text" }), aPrice = el("input", { type: "number", step: "0.01" });
+  ag.append(fieldWrap("Dish", aItem), fieldWrap("Brand", aBrand), fieldWrap("Selling price $", aPrice));
+  ab.append(ag);
+  const amsg = el("span", { className: "msg" });
+  const addBtn = el("button", { className: "btn", textContent: "Add dish" });
+  ab.append(el("div", { className: "actions" }, [addBtn, amsg]));
+  addCard.append(ab); view.append(addCard);
+  addBtn.onclick = async () => {
+    if (!aItem.value.trim()) { amsg.textContent = "Dish name is required."; amsg.className = "msg err"; return; }
+    const { error } = await sb.from("costing_dishes").insert([{ item: aItem.value.trim(), brand: aBrand.value.trim() || null, selling_price: aPrice.value === "" ? null : Number(aPrice.value) }]);
+    if (error) { amsg.textContent = error.message; amsg.className = "msg err"; return; }
+    amsg.textContent = "Added ✓"; amsg.className = "msg ok"; aItem.value = ""; aBrand.value = ""; aPrice.value = ""; loadDishes();
+  };
+
+  const dishCard = el("div", { className: "card" });
+  dishCard.append(el("h2", { textContent: "Dish costings" }));
+  const db = el("div", { className: "body" });
+  const dwrap = el("div"); db.append(dwrap);
+  dishCard.append(db); view.append(dishCard);
+
+  // ingredient datalist for recipe search
+  const dl = el("datalist", { id: "ing-datalist" });
+  view.append(dl);
+  function fillDatalist() { dl.innerHTML = ""; COST_ING.forEach(x => dl.append(el("option", { value: x.name }))); }
+
+  async function loadIngredients() {
+    const { data } = await sb.from("costing_ingredients").select("*").order("name");
+    COST_ING = data || []; COST_PRICE = {};
+    COST_ING.forEach(x => { COST_PRICE[(x.name || "").toLowerCase()] = x.price; });
+    fillDatalist();
+  }
+  const lineCost = l => { const p = COST_PRICE[(l.ingredient_name || "").toLowerCase()]; return (p != null && l.quantity != null) ? Number(p) * Number(l.quantity) : null; };
+
+  async function loadDishes() {
+    dwrap.innerHTML = "<div class='empty'>Loading…</div>";
+    const { data, error } = await sb.from("costing_dishes").select("*, costing_dish_lines(*)").order("brand").order("item");
+    if (error) { dwrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+    const dishes = data || [];
+    if (!dishes.length) { dwrap.innerHTML = "<div class='empty'>No dishes yet — add one above.</div>"; return; }
+    dwrap.innerHTML = "";
+    dishes.forEach(d => {
+      const lines = d.costing_dish_lines || [];
+      const cost = lines.reduce((a, l) => a + (lineCost(l) || 0), 0);
+      const pct = foodPct(cost, d.selling_price);
+      const det = el("details", { className: "order-row" });
+      const sum = el("summary");
+      sum.append(el("span", { textContent: d.item + (d.brand ? " · " + d.brand : "") }));
+      sum.append(el("span", { className: "ord-total", textContent: "Cost $" + cost.toFixed(2) }));
+      sum.append(el("span", { style: "margin-left:10px;font-weight:700;color:" + pctColor(pct), textContent: pct == null ? "—" : pct.toFixed(1) + "%" }));
+      det.append(sum);
+
+      const tbl = el("table");
+      tbl.append(el("thead", {}, el("tr", {}, ["Ingredient", "Qty", "Unit price $", "Line $", ""].map(h => el("th", { textContent: h })))));
+      const tb = el("tbody");
+      lines.forEach(l => {
+        const up = COST_PRICE[(l.ingredient_name || "").toLowerCase()];
+        tb.append(el("tr", {}, [
+          el("td", { textContent: l.ingredient_name }),
+          el("td", { textContent: String(l.quantity) }),
+          el("td", { textContent: up != null ? "$" + Number(up).toFixed(2) : "—" }),
+          el("td", { textContent: lineCost(l) != null ? "$" + lineCost(l).toFixed(2) : "—" }),
+          el("td", {}, el("button", { className: "btn ghost small", textContent: "✕", onclick: async () => { await sb.from("costing_dish_lines").delete().eq("id", l.id); loadDishes(); } }))
+        ]));
+      });
+      tbl.append(tb); det.append(tbl);
+
+      // add line row
+      const ingIn = el("input", { type: "text", placeholder: "Search ingredient…", list: "ing-datalist", style: "width:200px" });
+      const qIn = el("input", { type: "number", step: "0.0001", placeholder: "Qty", style: "width:90px" });
+      const lmsg = el("span", { className: "msg" });
+      const addLine = el("button", { className: "btn ghost small", textContent: "Add ingredient", onclick: async () => {
+        const nm = ingIn.value.trim(); if (!nm) { lmsg.textContent = "Pick an ingredient."; lmsg.className = "msg err"; return; }
+        if (!(nm.toLowerCase() in COST_PRICE)) { lmsg.textContent = "Not on the ingredient list."; lmsg.className = "msg err"; return; }
+        const { error } = await sb.from("costing_dish_lines").insert([{ dish_id: d.id, ingredient_name: nm, quantity: qIn.value === "" ? null : Number(qIn.value) }]);
+        if (error) { lmsg.textContent = error.message; lmsg.className = "msg err"; return; }
+        loadDishes();
+      }});
+      det.append(el("div", { className: "actions", style: "margin-top:8px" }, [ingIn, qIn, addLine, lmsg]));
+
+      // selling price + delete dish
+      const spI = el("input", { type: "number", step: "0.01", value: d.selling_price != null ? d.selling_price : "", style: "width:100px" });
+      spI.onchange = async () => { await sb.from("costing_dishes").update({ selling_price: spI.value === "" ? null : Number(spI.value) }).eq("id", d.id); loadDishes(); };
+      det.append(el("div", { className: "actions", style: "margin-top:8px" }, [
+        fieldWrap("Selling price $", spI),
+        el("span", { style: "align-self:center;color:#555", textContent: "GP: " + (pct == null ? "—" : (100 - pct).toFixed(1) + "%") }),
+        el("button", { className: "btn ghost small", textContent: "Delete dish", onclick: async () => { if (!confirm("Delete " + d.item + "?")) return; await sb.from("costing_dishes").delete().eq("id", d.id); loadDishes(); } })
+      ]));
+      dwrap.append(det);
+    });
+  }
+
+  await loadIngredients();
+  drawIngredients("");
+  loadDishes();
+}
+
+/* ===================== FIRE INSPECTION (everyone can upload) ===================== */
+async function renderFireInspection(view) {
+  view.innerHTML = "";
+  try { const { data } = await sb.rpc("all_sites"); ALL_SITES = data || []; } catch (e) { ALL_SITES = SITES.slice(); }
+
+  const intro = el("div", { className: "card" });
+  intro.append(el("h2", { textContent: "Fire Inspection" }));
+  const ib = el("div", { className: "body" });
+  ib.append(el("p", { style: "margin:0 0 8px;font-size:14px;line-height:1.5;color:#333", textContent: "Upload the receipt or certificate from your site's most recent fire safety inspection. Each site is responsible for keeping its current fire inspection record here so it can be produced on request during an audit or council visit." }));
+  ib.append(el("p", { style: "margin:0;font-size:14px;line-height:1.5;color:#333", textContent: "Take a clear photo of the receipt and upload it for your site. The image will show below." }));
+  intro.append(ib); view.append(intro);
+
+  // ---- upload (everyone) ----
+  const card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "Upload fire inspection receipt" }));
+  const b = el("div", { className: "body" });
+  const grid = el("div", { className: "formgrid" });
+  let siteSel = null;
+  if (IS_ADMIN || IS_FINANCE) {
+    siteSel = el("select");
+    siteSel.append(el("option", { value: "", textContent: "— site —" }));
+    ALL_SITES.forEach(s => siteSel.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+    grid.append(fieldWrap("Site", siteSel));
+  }
+  const titleI = el("input", { type: "text", placeholder: "e.g. Fire inspection – Nov 2026" });
+  const fileI = el("input", { type: "file", accept: "image/*", multiple: true });
+  grid.append(fieldWrap("Title", titleI), fieldWrap("Image(s)", fileI));
+  b.append(grid);
+  if (!IS_ADMIN && !IS_FINANCE) b.append(el("div", { className: "sub", textContent: MY_SITE ? ("Uploading for: " + MY_SITE.code + " · " + MY_SITE.name) : "No site is linked to your login." }));
+  const msg = el("span", { className: "msg" });
+  const save = el("button", { className: "btn", textContent: "Upload" });
+  b.append(el("div", { className: "actions" }, [save, msg]));
+  card.append(b); view.append(card);
+
+  save.onclick = async () => {
+    const site_id = siteSel ? Number(siteSel.value) : (MY_SITE && MY_SITE.id);
+    const files = Array.from(fileI.files || []);
+    if (!site_id) { msg.textContent = "Choose a site."; msg.className = "msg err"; return; }
+    if (!files.length) { msg.textContent = "Choose at least one image."; msg.className = "msg err"; return; }
+    save.disabled = true; msg.textContent = "Uploading…"; msg.className = "msg";
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const path = site_id + "/" + Date.now() + "_" + i + "_" + f.name.replace(/[^a-zA-Z0-9._-]/g, "");
+      const { error: upErr } = await sb.storage.from("fire").upload(path, f);
+      if (upErr) { save.disabled = false; msg.textContent = "Upload: " + upErr.message; msg.className = "msg err"; return; }
+      const { error } = await sb.from("fire_inspection").insert([{ site_id, title: titleI.value || f.name, file_path: path }]);
+      if (error) { save.disabled = false; msg.textContent = error.message; msg.className = "msg err"; return; }
+    }
+    save.disabled = false; msg.textContent = "Uploaded ✓"; msg.className = "msg ok";
+    titleI.value = ""; fileI.value = "";
+    loadFireList(listCard, { site: siteSel ? siteSel.value : "" });
+  };
+
+  // ---- list ----
+  const listCard = el("div", { className: "card" });
+  listCard.append(el("h2", { textContent: "Fire inspection receipts" }));
+  const lb = el("div", { className: "body" });
+  const filters = el("div", { className: "filters" });
+  const fSite = el("select");
+  fSite.append(el("option", { value: "", textContent: "All sites" }));
+  ALL_SITES.forEach(s => fSite.append(el("option", { value: s.id, textContent: `${s.code} · ${s.name}` })));
+  filters.append(fieldWrap("Site", fSite),
+    el("button", { className: "btn ghost", textContent: "View", onclick: () => loadFireList(listCard, { site: fSite.value }) }));
+  lb.append(filters);
+  const wrap = el("div"); lb.append(wrap);
+  listCard.append(lb); view.append(listCard);
+  loadFireList(listCard, {});
+}
+
+async function loadFireList(card, flt = {}) {
+  const wrap = card.querySelector(".body > div:last-child");
+  wrap.innerHTML = "<div class='empty'>Loading…</div>";
+  let q = sb.from("fire_inspection").select("*").order("created_at", { ascending: false }).limit(500);
+  if (flt.site) q = q.eq("site_id", flt.site);
+  const { data, error } = await q;
+  if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { wrap.innerHTML = "<div class='empty'>No fire inspection receipts yet.</div>"; return; }
+  wrap.innerHTML = "";
+  rows.forEach(r => {
+    const url = sb.storage.from("fire").getPublicUrl(r.file_path).data.publicUrl;
+    const canDelete = IS_ADMIN || (MY_SITE && r.site_id === MY_SITE.id);
+    const block = el("div", { style: "margin:0 0 22px;padding-bottom:16px;border-bottom:1px solid #eee" });
+    const headRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px" });
+    headRow.append(el("div", {}, [
+      el("strong", { textContent: r.title || "Fire inspection" }),
+      el("span", { style: "color:#777;margin-left:8px;font-size:13px", textContent: allSiteName(r.site_id) + " · " + new Date(r.created_at).toLocaleDateString() })
+    ]));
+    const actions = el("div", {}, [ el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Open full size" }) ]);
+    if (canDelete) actions.append(el("button", { className: "btn ghost small", textContent: "Delete", style: "margin-left:6px", onclick: async () => {
+      if (!confirm("Delete this fire inspection receipt?")) return;
+      await sb.storage.from("fire").remove([r.file_path]);
+      await sb.from("fire_inspection").delete().eq("id", r.id);
+      loadFireList(card, flt);
+    }}));
+    headRow.append(actions);
+    block.append(headRow);
+    block.append(el("img", { src: url, alt: r.title || "Fire inspection", style: "max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px" }));
     wrap.append(block);
   });
 }
