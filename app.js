@@ -2386,8 +2386,9 @@ async function renderCosting(view) {
   const ag = el("div", { className: "formgrid" });
   const aItem = el("input", { type: "text" });
   const aBrand = el("select"); COST_BRANDS.forEach(bn => aBrand.append(el("option", { value: bn, textContent: bn })));
-  const aPct = el("input", { type: "number", step: "0.1", value: "30" });
-  ag.append(fieldWrap("Dish", aItem), fieldWrap("Brand", aBrand), fieldWrap("Target food cost %", aPct));
+  const aSell = el("input", { type: "number", step: "0.01" });
+  const aGp = el("input", { type: "number", step: "0.1", value: "65" });
+  ag.append(fieldWrap("Dish", aItem), fieldWrap("Brand", aBrand), fieldWrap("Selling price $", aSell), fieldWrap("Target GP %", aGp));
   ab.append(ag);
   const amsg = el("span", { className: "msg" });
   const addBtn = el("button", { className: "btn", textContent: "Add dish" });
@@ -2395,9 +2396,9 @@ async function renderCosting(view) {
   addCard.append(ab); view.append(addCard);
   addBtn.onclick = async () => {
     if (!aItem.value.trim()) { amsg.textContent = "Dish name is required."; amsg.className = "msg err"; return; }
-    const { error } = await sb.from("costing_dishes").insert([{ item: aItem.value.trim(), brand: aBrand.value, target_pct: aPct.value === "" ? null : Number(aPct.value) }]);
+    const { error } = await sb.from("costing_dishes").insert([{ item: aItem.value.trim(), brand: aBrand.value, selling_price: aSell.value === "" ? null : Number(aSell.value), target_gp: aGp.value === "" ? null : Number(aGp.value) }]);
     if (error) { amsg.textContent = error.message; amsg.className = "msg err"; return; }
-    amsg.textContent = "Added ✓"; amsg.className = "msg ok"; aItem.value = ""; aPct.value = "30"; loadDishes();
+    amsg.textContent = "Added ✓"; amsg.className = "msg ok"; aItem.value = ""; aSell.value = ""; aGp.value = "65"; loadDishes();
   };
 
   const dishCard = el("div", { className: "card" });
@@ -2422,14 +2423,21 @@ async function renderCosting(view) {
   function dishBlock(d) {
     const lines = d.costing_dish_lines || [];
     const cost = lines.reduce((a, l) => a + (lineCost(l) || 0), 0);
-    const pct = d.target_pct;                                    // target food cost %
-    const price = (pct != null && Number(pct) > 0) ? cost / (Number(pct) / 100) : null;  // recommended selling price
+    const price = d.selling_price;
+    const fcPct = foodPct(cost, price);                                                      // actual food cost %
+    const gp = (price != null && Number(price) > 0) ? (Number(price) - cost) / Number(price) * 100 : null;  // actual GP %
+    const tgt = d.target_gp;
+    const pass = (gp != null && tgt != null) ? (gp >= Number(tgt)) : null;
     const det = el("details", { className: "order-row" });
     const sum = el("summary");
     sum.append(el("span", { textContent: d.item }));
     sum.append(el("span", { className: "ord-total", textContent: "Cost $" + cost.toFixed(2) }));
-    sum.append(el("span", { style: "margin-left:10px;font-weight:700;color:" + pctColor(pct), textContent: pct == null ? "—" : Number(pct).toFixed(1) + "%" }));
-    sum.append(el("span", { style: "margin-left:10px;color:#141414", textContent: price == null ? "" : "Price $" + price.toFixed(2) }));
+    if (price != null) sum.append(el("span", { style: "margin-left:10px;color:#141414", textContent: "Sell $" + Number(price).toFixed(2) }));
+    if (gp != null) sum.append(el("span", { style: "margin-left:10px;color:#555", textContent: "GP " + gp.toFixed(1) + "%" }));
+    if (pass != null) sum.append(el("span", { className: "badge " + (pass ? "ok" : "bad"), style: "margin-left:10px", textContent: pass ? "PASS" : "OVER" }));
+    const delTop = el("button", { className: "btn ghost small", style: "margin-left:auto", textContent: "✕ Delete" });
+    delTop.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); (async () => { if (!confirm("Delete " + d.item + "?")) return; await sb.from("costing_dishes").delete().eq("id", d.id); loadDishes(); })(); };
+    sum.append(delTop);
     det.append(sum);
 
     const tbl = el("table");
@@ -2437,9 +2445,11 @@ async function renderCosting(view) {
     const tb = el("tbody");
     lines.forEach(l => {
       const up = COST_PRICE[(l.ingredient_name || "").toLowerCase()];
+      const qEdit = el("input", { type: "number", step: "0.0001", value: l.quantity != null ? l.quantity : "", style: "width:80px" });
+      qEdit.onchange = async () => { await sb.from("costing_dish_lines").update({ quantity: qEdit.value === "" ? null : Number(qEdit.value) }).eq("id", l.id); loadDishes(); };
       tb.append(el("tr", {}, [
         el("td", { textContent: l.ingredient_name }),
-        el("td", { textContent: String(l.quantity) }),
+        el("td", {}, qEdit),
         el("td", { textContent: up != null ? "$" + Number(up).toFixed(2) : "—" }),
         el("td", { textContent: lineCost(l) != null ? "$" + lineCost(l).toFixed(2) : "—" }),
         el("td", {}, el("button", { className: "btn ghost small", textContent: "✕", onclick: async () => { await sb.from("costing_dish_lines").delete().eq("id", l.id); loadDishes(); } }))
@@ -2460,12 +2470,16 @@ async function renderCosting(view) {
     }});
     det.append(el("div", { className: "actions", style: "margin-top:8px" }, [ingIn, qIn, addLine, lmsg]));
 
-    // target % drives the recommended selling price
-    const pctI = el("input", { type: "number", step: "0.1", value: pct != null ? pct : "", style: "width:90px" });
-    pctI.onchange = async () => { await sb.from("costing_dishes").update({ target_pct: pctI.value === "" ? null : Number(pctI.value) }).eq("id", d.id); loadDishes(); };
-    det.append(el("div", { className: "actions", style: "margin-top:8px" }, [
-      fieldWrap("Target food cost %", pctI),
-      el("span", { style: "align-self:center;color:#141414;font-weight:600", textContent: price == null ? "Set a % to get the selling price" : ("Recommended selling price: $" + price.toFixed(2) + "   ·   GP " + (100 - Number(pct)).toFixed(1) + "%") }),
+    // selling price + target GP% + PASS/OVER + delete
+    const spI = el("input", { type: "number", step: "0.01", value: price != null ? price : "", style: "width:100px" });
+    spI.onchange = async () => { await sb.from("costing_dishes").update({ selling_price: spI.value === "" ? null : Number(spI.value) }).eq("id", d.id); loadDishes(); };
+    const gpI = el("input", { type: "number", step: "0.1", value: tgt != null ? tgt : "", style: "width:90px" });
+    gpI.onchange = async () => { await sb.from("costing_dishes").update({ target_gp: gpI.value === "" ? null : Number(gpI.value) }).eq("id", d.id); loadDishes(); };
+    det.append(el("div", { className: "actions", style: "margin-top:8px;flex-wrap:wrap" }, [
+      fieldWrap("Selling price $", spI),
+      fieldWrap("Target GP %", gpI),
+      el("span", { style: "align-self:center;color:#555", textContent: fcPct == null ? "" : "Food cost " + fcPct.toFixed(1) + "%  ·  actual GP " + (gp == null ? "—" : gp.toFixed(1) + "%") }),
+      pass == null ? el("span", {}) : el("span", { style: "align-self:center;font-weight:700;color:" + (pass ? "#1a7f37" : "#c0392b"), textContent: pass ? "PASS — meets target GP" : "OVER — below target GP" }),
       el("button", { className: "btn ghost small", textContent: "Delete dish", onclick: async () => { if (!confirm("Delete " + d.item + "?")) return; await sb.from("costing_dishes").delete().eq("id", d.id); loadDishes(); } })
     ]));
     return det;
