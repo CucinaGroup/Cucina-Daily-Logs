@@ -471,7 +471,10 @@ function renderLog(id, view) {
     }
     const otherEmpty = def.fields.find(f => f.allowOther && inputs[f.key] && inputs[f.key].value === "__other__" && (!otherInputs[f.key] || !otherInputs[f.key].value.trim()));
     if (otherEmpty) { msg.textContent = "Type the item for ‘Others’."; msg.className = "msg err"; return; }
-    const missing = def.fields.filter(f => (f.req || f.type === "employee") && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
+    // When a "lock-others" top option is chosen (e.g. NO WASTAGE TODAY), only the
+    // structural fields (date/site) stay required — recorded-by becomes optional.
+    const lockTopActive = def.fields.some(f => f.topOption && f.lockOnTop && inputs[f.key] && inputs[f.key].value === f.topOption);
+    const missing = def.fields.filter(f => (f.req || (f.type === "employee" && !lockTopActive)) && (row[f.key] === null || row[f.key] === undefined || row[f.key] === ""));
     if (missing.length) { msg.textContent = "Fill required (*) fields."; msg.className = "msg err"; return; }
     saveBtn.disabled = true; msg.textContent = editState.id ? "Updating…" : "Saving…"; msg.className = "msg";
     // Upload any photo fields; keep the existing photo when editing without a new file.
@@ -925,7 +928,7 @@ async function renderOrder(view) {
     submit.disabled = true; omsg.textContent = "Submitting…"; omsg.className = "msg";
     const { data: ord, error } = await sb.from("orders").insert([{ site_id: orderSite }]).select().single();
     if (error) { submit.disabled = false; omsg.textContent = error.message; omsg.className = "msg err"; return; }
-    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, merchant_code: i.merchant_code || null, unit_price: Number(i.price), quantity: qty[i.id] }));
+    const payload = lines.map(i => ({ order_id: ord.id, item_id: i.id, item_name: i.name, merchant_code: i.merchant_code || null, supplier: i.supplier || null, unit_price: Number(i.price), quantity: qty[i.id] }));
     const { error: lerr } = await sb.from("order_lines").insert(payload);
     submit.disabled = false;
     if (lerr) { omsg.textContent = lerr.message; omsg.className = "msg err"; return; }
@@ -955,16 +958,24 @@ async function renderOrderHistory(view) {
   card.append(b); view.append(card);
   let lastOrders = [];
 
+  // Group an order's lines by vendor (supplier), vendors A→Z, items A→Z within each.
+  function groupByVendor(lines) {
+    const map = {};
+    (lines || []).forEach(l => { const v = l.supplier || "(Unassigned)"; (map[v] = map[v] || []).push(l); });
+    return Object.keys(map).sort((a, b) => a.localeCompare(b))
+      .map(v => ({ vendor: v, items: map[v].sort((x, y) => String(x.item_name || "").localeCompare(String(y.item_name || ""))) }));
+  }
+
   function ordersCSV() {
     if (!lastOrders.length) return;
-    const head = ["Order ID","Date","Site","Status","Delivered","Merchant code","Item","Qty","Unit price","Line total"];
+    const head = ["Order ID","Date","Site","Status","Delivered","Vendor","Merchant code","Item","Qty","Unit price","Line total"];
     const rows = [];
     lastOrders.forEach(o => {
       const d = new Date(o.created_at).toLocaleString();
-      (o.order_lines || []).forEach(l => rows.push([
-        o.id, d, siteName(o.site_id), o.status || "Submitted", o.delivered ? "Yes" : "No", l.merchant_code || "", l.item_name,
+      groupByVendor(o.order_lines).forEach(g => g.items.forEach(l => rows.push([
+        o.id, d, siteName(o.site_id), o.status || "Submitted", o.delivered ? "Yes" : "No", g.vendor, l.merchant_code || "", l.item_name,
         l.quantity, Number(l.unit_price).toFixed(2), (Number(l.unit_price) * Number(l.quantity)).toFixed(2)
-      ]));
+      ])));
     });
     const csv = [head, ...rows].map(a => a.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const tag = (siteSel && siteSel.value) ? "_" + siteName(Number(siteSel.value)).split(" ")[0] : "_all-sites";
@@ -974,7 +985,7 @@ async function renderOrderHistory(view) {
 
   async function load() {
     wrap.innerHTML = "<div class='empty'>Loading…</div>";
-    let q = sb.from("orders").select("*, order_lines(id,quantity,unit_price,item_name,merchant_code)").order("created_at", { ascending: false }).limit(200);
+    let q = sb.from("orders").select("*, order_lines(id,quantity,unit_price,item_name,merchant_code,supplier)").order("created_at", { ascending: false }).limit(200);
     if (siteSel && siteSel.value) q = q.eq("site_id", siteSel.value);
     const { data, error } = await q;
     if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
@@ -998,22 +1009,26 @@ async function renderOrderHistory(view) {
       const tb = el("tbody");
       const orderedDate = new Date(o.created_at).toLocaleDateString();
       const qInputs = {};
-      (o.order_lines || []).forEach(l => {
-        let qtyCell;
-        if (IS_ADMIN) {
-          const qi = el("input", { type: "number", min: "0", step: "1", value: String(l.quantity), className: "qty" });
-          qInputs[l.id] = qi; qtyCell = el("td", {}, qi);
-        } else {
-          qtyCell = el("td", { textContent: String(l.quantity) });
-        }
-        tb.append(el("tr", {}, [
-          el("td", { textContent: orderedDate }),
-          el("td", { textContent: l.item_name }),
-          el("td", { textContent: l.merchant_code || "" }),
-          qtyCell,
-          el("td", { textContent: "$" + Number(l.unit_price).toFixed(2) }),
-          el("td", { textContent: "$" + (Number(l.unit_price) * Number(l.quantity)).toFixed(2) })
-        ]));
+      groupByVendor(o.order_lines).forEach(g => {
+        const sub = g.items.reduce((a, l) => a + Number(l.unit_price) * Number(l.quantity), 0);
+        tb.append(el("tr", {}, [el("td", { colSpan: 6, style: "background:#f4f4f4;font-weight:700;color:#141414", textContent: g.vendor + "  —  $" + sub.toFixed(2) })]));
+        g.items.forEach(l => {
+          let qtyCell;
+          if (IS_ADMIN) {
+            const qi = el("input", { type: "number", min: "0", step: "1", value: String(l.quantity), className: "qty" });
+            qInputs[l.id] = qi; qtyCell = el("td", {}, qi);
+          } else {
+            qtyCell = el("td", { textContent: String(l.quantity) });
+          }
+          tb.append(el("tr", {}, [
+            el("td", { textContent: orderedDate }),
+            el("td", { textContent: l.item_name }),
+            el("td", { textContent: l.merchant_code || "" }),
+            qtyCell,
+            el("td", { textContent: "$" + Number(l.unit_price).toFixed(2) }),
+            el("td", { textContent: "$" + (Number(l.unit_price) * Number(l.quantity)).toFixed(2) })
+          ]));
+        });
       });
       tbl.append(tb); det.append(tbl);
 
@@ -1065,7 +1080,7 @@ async function renderOrderHistory(view) {
 // Each url can be an external link (Google Drive, Dropbox, your website) or a
 // file you add to the repo (e.g. "templates/flappys-leave-form.pdf").
 const LEAVE_TEMPLATES = [
- { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
+   { label: "Leave Form — Flappy's Fried Chicken", url: "https://www.dropbox.com/scl/fi/20ufbv1s7100j4vhojdoh/LEAVE-FORM_TEMPLATE_FLAPPYS.pdf?rlkey=sqtphm4hl0u3to1pzwvc2f3i8&st=tmir5o2y&dl=0" },
   { label: "Leave Form — Burger Point",           url: "https://www.dropbox.com/scl/fi/enp373sw7anbvijzs11ue/LEAVE-FORM_TEMPLATE_BURGER-POINT.pdf?rlkey=un8vvem3bvcsykxvlv10rmvqr&st=qkwphaqu&dl=0" },
   { label: "Leave Form — Sir Manong",             url: "https://www.dropbox.com/scl/fi/yzup34u9tb6cuh37bmkag/LEAVE-FORM_TEMPLATE_SM.pdf?rlkey=v8gk61vh5td2ck4zdz16h3yvf&st=ji17y3wv&dl=0" },
   { label: "Leave Form — Masa",                   url: "https://www.dropbox.com/scl/fi/414wa2id25vyjfw92ze0s/MASA-LEAVE-REQUEST-FORM.pdf?rlkey=tf8e48ln0l6f7h5yr4b9cxbfj&st=0k6uhhcj&dl=0" }
@@ -2100,8 +2115,8 @@ async function renderHalal(view) {
     const b = el("div", { className: "body" });
     const grid = el("div", { className: "formgrid" });
     const titleI = el("input", { type: "text" });
-    const fileI = el("input", { type: "file", accept: "application/pdf,image/*", multiple: true });
-    grid.append(fieldWrap("Certificate title", titleI), fieldWrap("File(s)", fileI));
+    const fileI = el("input", { type: "file", accept: "image/*", multiple: true });
+    grid.append(fieldWrap("Certificate title", titleI), fieldWrap("Image(s)", fileI));
     b.append(grid);
     const msg = el("span", { className: "msg" });
     const save = el("button", { className: "btn", textContent: "Upload" });
@@ -2129,40 +2144,36 @@ async function renderHalal(view) {
   const listCard = el("div", { className: "card" });
   listCard.append(el("h2", { textContent: "Halal certificates" }));
   const lb = el("div", { className: "body" });
-  lb.append(el("div", { className: "tablewrap" }));
+  const wrap = el("div"); lb.append(wrap);
   listCard.append(lb); view.append(listCard);
   loadHalalList(listCard);
 }
 
 async function loadHalalList(card) {
-  const tw = card.querySelector(".tablewrap");
-  tw.innerHTML = "<div class='empty'>Loading…</div>";
-  const { data, error } = await sb.from("halal").select("*").order("title").limit(1000);
-  if (error) { tw.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
+  const wrap = card.querySelector(".body > div:last-child");
+  wrap.innerHTML = "<div class='empty'>Loading…</div>";
+  const { data, error } = await sb.from("halal").select("*").order("created_at", { ascending: false }).limit(500);
+  if (error) { wrap.innerHTML = `<div class='empty'>${error.message}</div>`; return; }
   const rows = data || [];
-  if (!rows.length) { tw.innerHTML = "<div class='empty'>No halal certificates yet.</div>"; return; }
-  const table = el("table");
-  const head = ["Certificate","File"].concat(IS_ADMIN ? ["Action"] : []);
-  table.append(el("thead", {}, el("tr", {}, head.map(h => el("th", { textContent: h })))));
-  const tb = el("tbody");
+  if (!rows.length) { wrap.innerHTML = "<div class='empty'>No halal certificate uploaded yet.</div>"; return; }
+  wrap.innerHTML = "";
   rows.forEach(r => {
     const url = sb.storage.from("halal").getPublicUrl(r.file_path).data.publicUrl;
-    const cells = [
-      el("td", { textContent: r.title || "" }),
-      el("td", {}, el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Download" }))
-    ];
-    if (IS_ADMIN) {
-      cells.push(el("td", {}, el("button", { className: "btn ghost small", textContent: "Delete", onclick: async () => {
-        if (!confirm("Delete this halal certificate?")) return;
-        await sb.storage.from("halal").remove([r.file_path]);
-        await sb.from("halal").delete().eq("id", r.id);
-        loadHalalList(card);
-      }})));
-    }
-    tb.append(el("tr", {}, cells));
+    const block = el("div", { style: "margin:0 0 22px;padding-bottom:16px;border-bottom:1px solid #eee" });
+    const headRow = el("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px" });
+    headRow.append(el("div", {}, [ el("strong", { textContent: r.title || "Halal certificate" }) ]));
+    const actions = el("div", {}, [ el("a", { className: "btn ghost small", href: url, target: "_blank", textContent: "Open full size" }) ]);
+    if (IS_ADMIN) actions.append(el("button", { className: "btn ghost small", textContent: "Delete", style: "margin-left:6px", onclick: async () => {
+      if (!confirm("Delete this halal certificate?")) return;
+      await sb.storage.from("halal").remove([r.file_path]);
+      await sb.from("halal").delete().eq("id", r.id);
+      loadHalalList(card);
+    }}));
+    headRow.append(actions);
+    block.append(headRow);
+    block.append(el("img", { src: url, alt: r.title || "Halal certificate", style: "max-width:100%;height:auto;border:1px solid #ddd;border-radius:6px" }));
+    wrap.append(block);
   });
-  table.append(tb);
-  tw.innerHTML = ""; tw.append(table);
 }
 
 /* ===================== ALLERGEN MATRIX ===================== */
